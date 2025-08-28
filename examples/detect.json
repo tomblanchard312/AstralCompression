@@ -1,0 +1,9 @@
+{
+  "type": "DETECT",
+  "subject": "KESTREL-2",
+  "object": "H2O_ICE",
+  "lat": -43.7,
+  "lon": 130.2,
+  "depth_m": 18.0,
+  "conf": 0.94
+}
