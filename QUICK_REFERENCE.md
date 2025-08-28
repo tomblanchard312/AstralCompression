@@ -8,6 +8,12 @@
 - **✅ Fountain Codes**: Reliable transmission with packet loss tolerance
 - **✅ All Data Types**: TEXT, BINARY, IMAGE, VOICE, VIDEO
 
+## 📚 Repository
+
+**GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
+
+**License**: MIT License with Attribution Requirement - See [LICENSE](../LICENSE) for details.
+
 ## 🔧 Quick Start
 
 ### Basic Compression
@@ -81,6 +87,16 @@ python test_mckay_fountain_multitype.py
 - **Full Integration Guide**: [MCKAY_ASTRAL_INTEGRATION.md](MCKAY_ASTRAL_INTEGRATION.md)
 - **Main README**: [README.md](README.md)
 - **System Status**: 100% operational for all data types
+
+---
+
+## 📚 Repository & License
+
+**GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
+
+**License**: MIT License with Attribution Requirement - See [LICENSE](../LICENSE) for details.
+
+*This project requires attribution to the original creator when used or distributed. Please see the LICENSE file for complete requirements.*
 
 ---
 

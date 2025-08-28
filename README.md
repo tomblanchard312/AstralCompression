@@ -11,6 +11,12 @@ message delivery across deep‑space links. ASTRAL focuses on:
 > This is a *starter* reference implementation to experiment with ideas.
 > It aims to be simple to read and hack on rather than fully optimized.
 
+## 📚 Repository
+
+**GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
+
+**License**: MIT License with Attribution Requirement - See [LICENSE](LICENSE) for details.
+
 ## 🚀 Dr. Rodney McKay's Extreme Compression System
 
 ![Dr. Rodney McKay](https://upload.wikimedia.org/wikipedia/en/f/f9/RodneyMcKaypic.jpg)
@@ -184,3 +190,13 @@ python -m astral.cli unpack out_batch.bin
 - **Atomized Packets**: ✅ **100% OPERATIONAL** (32-byte atoms with CRC-8 integrity)
 - **Fountain Codes**: ✅ **100% OPERATIONAL** with optimized parameters for all data types
 - **Deep Space Ready**: ✅ **FULLY OPERATIONAL** for all data types! 🚀
+
+---
+
+## 📚 Repository & License
+
+**GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
+
+**License**: MIT License with Attribution Requirement - See [LICENSE](LICENSE) for details.
+
+*This project requires attribution to the original creator when used or distributed. Please see the LICENSE file for complete requirements.*

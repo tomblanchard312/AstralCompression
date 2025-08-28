@@ -6,6 +6,12 @@
 
 This system combines **McKay's extreme compression algorithms** with your existing **ASTRAL fountain codes** to achieve compression ratios of **2-100x** (depending on data type). Perfect for deep space missions where bandwidth is limited and data integrity is critical.
 
+## 📚 Repository
+
+**GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
+
+**License**: MIT License with Attribution Requirement - See [LICENSE](../LICENSE) for details.
+
 ## 🎯 Key Features
 
 - **McKay's Semantic Compression**: Understands space mission vocabulary and patterns
@@ -280,6 +286,16 @@ print(f"Transmission time reduction: {bandwidth_saved:.0f}%")
 The McKay + ASTRAL system provides **extreme compression** for deep space communication while maintaining **data integrity** through your existing fountain codes. With compression ratios of **2-100x**, you can transmit massive amounts of mission data efficiently across vast distances.
 
 **Ready for deep space exploration with McKay's compression mastery!** 🚀✨
+
+---
+
+## 📚 Repository & License
+
+**GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
+
+**License**: MIT License with Attribution Requirement - See [LICENSE](../LICENSE) for details.
+
+*This project requires attribution to the original creator when used or distributed. Please see the LICENSE file for complete requirements.*
 
 ---
 

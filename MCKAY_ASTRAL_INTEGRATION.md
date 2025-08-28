@@ -4,7 +4,13 @@
 
 **Dr. Rodney McKay's Extreme Compression System** is now fully integrated with ASTRAL's GIST-first atomized packet architecture, creating the most advanced deep-space transmission system ever devised. This system achieves compression ratios of **2x to 180x** across multiple data types while maintaining 100% operational reliability even under severe packet loss.
 
-> **Inspired by**: [Atlantis Data Burst](https://www.gateworld.net/wiki/Atlantis_data_burst) - Dr. McKay's fictional but scientifically-grounded approach to extreme data compression for long-distance space transmission.
+> **Inspired by**: [Atlantis Data Burst](https://www.gateworld.net/wiki/Atlantis_data_burst) - Dr. McKay's fictional but scientifically-grounded approach to extreme data compression for long-distance space transmission. This implementation brings that concept to reality with modern compression algorithms and fountain codes.
+
+## 📚 Repository
+
+**GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
+
+**License**: MIT License with Attribution Requirement - See [LICENSE](../LICENSE) for details.
 
 ## 🚀 System Architecture
 
@@ -254,6 +260,16 @@ python test_mckay_fountain_multitype.py
 - **LZMA Compression**: 7-Zip algorithm for maximum compression
 - **CRC-8 Integrity**: J1850 checksums for atomic packet validation
 - **GIST-First Architecture**: Progressive decoding for packet loss tolerance
+
+---
+
+## 📚 Repository & License
+
+**GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
+
+**License**: MIT License with Attribution Requirement - See [LICENSE](../LICENSE) for details.
+
+*This project requires attribution to the original creator when used or distributed. Please see the LICENSE file for complete requirements.*
 
 ---
 
