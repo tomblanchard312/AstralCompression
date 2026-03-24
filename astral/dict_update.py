@@ -1,8 +1,8 @@
 # DICT_UPDATE atom payloads and helpers.
-# We keep it simple:
-# Each DICT_UPDATE atom payload[0] = flags (bit0=more follows), payload[1..] = UTF-8 bytes with 0x00 separators.
-# The receiver concatenates sequences until a flags byte with bit0=0, then splits on 0x00 to get words.
-# Words are appended after BASE_LEXICON for dynamic token mapping during this message.
+# We keep it simple.
+# payload[0] = flags (bit0=more follows), payload[1..] = UTF-8 bytes
+# separated with 0x00. The receiver concatenates chunks until a flags
+# byte with bit0=0, then splits on 0x00 to recover words.
 from typing import List
 
 
@@ -41,7 +41,7 @@ def split_words_from_atoms(atom_payloads: List[bytes]) -> list[str]:
                 word = decoded.strip().lower()
                 if word:
                     parts.append(word)
-            except:
+            except (UnicodeDecodeError, ValueError):
                 continue
 
     # Deduplicate while preserving order
@@ -68,7 +68,7 @@ def make_dict_update_atoms(words: list[str]) -> list[bytes]:
                 encoded = w.strip().encode("utf-8")
                 if encoded:
                     valid_words.append(encoded)
-            except:
+            except (UnicodeError, ValueError):
                 continue
 
     if not valid_words:
@@ -80,7 +80,7 @@ def make_dict_update_atoms(words: list[str]) -> list[bytes]:
     atoms = []
 
     for i in range(0, len(data), max_chunk):
-        chunk = data[i : i + max_chunk]
+        chunk = data[i:i + max_chunk]
         more = 1 if (i + max_chunk) < len(data) else 0
         atoms.append(bytes([more]) + chunk)
 

@@ -1,4 +1,5 @@
-import json, argparse
+import argparse
+import json
 from .codec import (
     pack_message,
     unpack_stream,
@@ -7,6 +8,13 @@ from .codec import (
     pack_cmd_message,
     pack_text_with_dict,
     pack_cmd_batch,
+    pack_message_sp,
+    unpack_stream_sp,
+    unpack_frames_tm,
+)
+from .spacepacket import (
+    SpacePacketSequenceCounter,
+    APID_MAP,
 )
 from .voice import decode_bitstream_to_wav
 
@@ -46,7 +54,10 @@ def cmd_pack(args):
         msg = read_json(args.input)
         blob = pack_message(msg, extra_fountain=args.extra)
         write_bin(args.output, blob)
-        print(f"Wrote {len(blob)} bytes to {args.output} ({len(blob)//32} atoms).")
+        print(
+            f"Wrote {len(blob)} bytes to {args.output} "
+            f"({len(blob)//32} atoms)."
+        )
     except Exception as e:
         print(f"Error packing message: {e}")
         return 1
@@ -72,14 +83,15 @@ def cmd_simulate(args):
         import random
 
         for i in range(0, len(data), atom_size):
-            atom = data[i : i + atom_size]
+            atom = data[i:i + atom_size]
             if len(atom) < atom_size:
                 break
             if random.random() >= args.drop:
                 out += atom
         write_bin(args.output, bytes(out))
         print(
-            f"Simulated drop rate {args.drop:.2f}. Input atoms={len(data)//32}, output atoms={len(out)//32}."
+            f"Simulated drop rate {args.drop:.2f}. "
+            f"Input atoms={len(data)//32}, output atoms={len(out)//32}."
         )
     except Exception as e:
         print(f"Error simulating packet loss: {e}")
@@ -89,12 +101,11 @@ def cmd_simulate(args):
 
 def cmd_pack_text(args):
     try:
-        blob = pack_text_message(
-            args.text, extra_fountain=args.extra, refine=args.refine
-        )
+        blob = pack_text_message(args.text, extra_fountain=args.extra)
         write_bin(args.output, blob)
         print(
-            f"Wrote {len(blob)} bytes to {args.output} ({len(blob)//32} atoms). TYPE=TEXT"
+            f"Wrote {len(blob)} bytes to {args.output} "
+            f"({len(blob)//32} atoms). TYPE=TEXT"
         )
     except Exception as e:
         print(f"Error packing text message: {e}")
@@ -106,11 +117,14 @@ def cmd_pack_text_dict(args):
     try:
         words = [w.strip() for w in args.words.split(",") if w.strip()]
         blob = pack_text_with_dict(
-            words, args.text, extra_fountain=args.extra, refine=args.refine
+            words,
+            args.text,
+            extra_fountain=args.extra,
         )
         write_bin(args.output, blob)
         print(
-            f"Wrote {len(blob)} bytes to {args.output} ({len(blob)//32} atoms). TYPE=TEXT with DICT_UPDATE"
+            f"Wrote {len(blob)} bytes to {args.output} "
+            f"({len(blob)//32} atoms). TYPE=TEXT with DICT_UPDATE"
         )
     except Exception as e:
         print(f"Error packing text with dictionary: {e}")
@@ -123,7 +137,8 @@ def cmd_pack_voice(args):
         blob = pack_voice_message(args.input, extra_fountain=args.extra)
         write_bin(args.output, blob)
         print(
-            f"Wrote {len(blob)} bytes to {args.output} ({len(blob)//32} atoms). TYPE=VOICE"
+            f"Wrote {len(blob)} bytes to {args.output} "
+            f"({len(blob)//32} atoms). TYPE=VOICE"
         )
     except Exception as e:
         print(f"Error packing voice message: {e}")
@@ -135,10 +150,14 @@ def cmd_unpack_voice(args):
     try:
         result = unpack_stream(read_bin(args.input))
         if not result.get("complete"):
-            print(json.dumps({"error": "incomplete", "gist": result.get("gist", {})}))
+            print(
+                json.dumps(
+                    {"error": "incomplete", "gist": result.get("gist", {})}
+                )
+            )
             return 0
-        msg = result.get("message", {})
-        if msg.get("type") != "VOICE":
+        msg = result.get("message")
+        if not isinstance(msg, dict) or msg.get("type") != "VOICE":
             print(json.dumps(result, indent=2))
             return 0
         data = msg.get("bytes", b"")
@@ -154,12 +173,11 @@ def cmd_pack_cmd(args):
     try:
         cmd = json.loads(args.json)
         key = bytes.fromhex(args.key) if args.key else None
-        blob = pack_cmd_message(
-            cmd, extra_fountain=args.extra, key=key, refine=args.refine
-        )
+        blob = pack_cmd_message(cmd, extra_fountain=args.extra, key=key)
         write_bin(args.output, blob)
         print(
-            f"Wrote {len(blob)} bytes to {args.output} ({len(blob)//32} atoms). TYPE=CMD"
+            f"Wrote {len(blob)} bytes to {args.output} "
+            f"({len(blob)//32} atoms). TYPE=CMD"
         )
     except Exception as e:
         print(f"Error packing command message: {e}")
@@ -171,28 +189,155 @@ def cmd_pack_cmd_batch(args):
     try:
         batch = json.loads(args.json)
         key = bytes.fromhex(args.key) if args.key else None
-        contact = None
-        if args.contact:
-            contact = []
-            for win in args.contact.split(","):
-                if "-" in win:
-                    s, e = win.split("-", 1)
-                    contact.append((int(s), int(e)))
-        blob = pack_cmd_batch(
-            batch,
-            extra_fountain=args.extra,
-            key=key,
-            key_id=args.key_id,
-            counter=args.counter,
-            refine=args.refine,
-            contact_plan=contact,
-        )
+        blob = pack_cmd_batch(batch, extra_fountain=args.extra, key=key)
         write_bin(args.output, blob)
         print(
-            f"Wrote {len(blob)} bytes to {args.output} ({len(blob)//32} atoms). TYPE=CMD_BATCH"
+            f"Wrote {len(blob)} bytes to {args.output} "
+            f"({len(blob)//32} atoms). TYPE=CMD_BATCH"
         )
     except Exception as e:
         print(f"Error packing command batch: {e}")
+        return 1
+    return 0
+
+
+def cmd_wrap_sp(args):
+    try:
+        astral_stream = read_bin(args.input)
+        if args.msg_type not in APID_MAP:
+            valid_types = list(APID_MAP.keys())
+            print(
+                f"Error: msg_type '{args.msg_type}' not in APID_MAP. "
+                f"Valid types: {valid_types}"
+            )
+            return 1
+        counter = SpacePacketSequenceCounter()
+        apid = APID_MAP[args.msg_type][0]
+        if args.seq_count is not None:
+            counter._counts[apid] = args.seq_count % 16384
+        packet = pack_message_sp(
+            {"type": args.msg_type, "data": astral_stream},
+            counter,
+        )
+        write_bin(args.output, packet)
+        print(
+            f"Wrapped {len(astral_stream)} bytes into Space Packet "
+            f"({len(packet)} bytes total)."
+        )
+    except Exception as e:
+        print(f"Error wrapping Space Packet: {e}")
+        return 1
+    return 0
+
+
+def cmd_unwrap_sp(args):
+    try:
+        packet = read_bin(args.input)
+        result = unpack_stream_sp(packet)
+        if "error" in result:
+            print(f"Error: {result['error']}")
+            return 1
+        print(json.dumps(result, indent=2))
+    except Exception as e:
+        print(f"Error unwrapping Space Packet: {e}")
+        return 1
+    return 0
+
+
+def cmd_encode_rs(args):
+    """Apply RS FEC to an ASTRAL binary file."""
+    try:
+        from .rs_fec import encode_stream, CODEWORD_SIZE
+
+        atom_stream = read_bin(args.input)
+        if len(atom_stream) % 32 != 0:
+            print(
+                f"Error: input length {len(atom_stream)} "
+                "is not a multiple of 32. "
+                "Is this a valid ASTRAL stream?"
+            )
+            return 1
+        rs_stream = encode_stream(atom_stream, e=args.e)
+        write_bin(args.output, rs_stream)
+        n_atoms = len(atom_stream) // 32
+        print(
+            f"RS-E{args.e} encoded {n_atoms} atoms: "
+            f"{len(atom_stream)} -> {len(rs_stream)} bytes "
+            f"(codeword_size={CODEWORD_SIZE[args.e]})"
+        )
+    except Exception as exc:
+        print(f"Error encoding RS stream: {exc}")
+        return 1
+    return 0
+
+
+def cmd_decode_rs(args):
+    """Decode an RS-protected stream, correcting bit errors."""
+    try:
+        from .rs_fec import decode_stream, CODEWORD_SIZE
+
+        rs_stream = read_bin(args.input)
+        atom_stream, n_corrected, n_uncorrectable = decode_stream(
+            rs_stream, e=args.e
+        )
+        write_bin(args.output, atom_stream)
+        n_atoms = len(atom_stream) // 32
+        stats = {
+            "e": args.e,
+            "input_bytes": len(rs_stream),
+            "output_atoms": n_atoms,
+            "corrected_symbols": n_corrected,
+            "uncorrectable_atoms": n_uncorrectable,
+            "codeword_size": CODEWORD_SIZE[args.e],
+        }
+        print(json.dumps(stats, indent=2))
+    except Exception as exc:
+        print(f"Error decoding RS stream: {exc}")
+        return 1
+    return 0
+
+
+def cmd_frame_tm(args):
+    """Segment an ASTRAL binary into CCSDS TM Transfer Frames."""
+    try:
+        from .tmframe import TmFrameCounter, WIRE_FRAME_SIZE, encode_frames
+
+        data = read_bin(args.input)
+        counter = TmFrameCounter()
+        wire = encode_frames(
+            data,
+            scid=args.scid,
+            vcid=args.vcid,
+            counter=counter,
+            randomise=not args.no_randomise,
+        )
+        write_bin(args.output, wire)
+        n_frames = len(wire) // WIRE_FRAME_SIZE
+        print(
+            f"Framed {len(data)} bytes into {n_frames} TM frames "
+            f"({len(wire)} bytes), SCID={args.scid}, VCID={args.vcid}"
+        )
+    except Exception as exc:
+        print(f"Error framing TM stream: {exc}")
+        return 1
+    return 0
+
+
+def cmd_deframe_tm(args):
+    """Decode CCSDS TM Transfer Frames and recover the ASTRAL stream."""
+    try:
+        wire = read_bin(args.input)
+        result = unpack_frames_tm(wire, randomise=not args.no_randomise)
+
+        # bytes fields are not JSON-serialisable
+        if isinstance(result.get("message"), dict):
+            msg = result["message"]
+            if "bytes" in msg and isinstance(msg["bytes"], bytes):
+                msg["bytes"] = msg["bytes"].hex()
+
+        print(json.dumps(result, indent=2))
+    except Exception as exc:
+        print(f"Error deframing TM stream: {exc}")
         return 1
     return 0
 
@@ -201,11 +346,16 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="astral")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    p_pack = sub.add_parser("pack", help="pack JSON message to atomized binary")
+    p_pack = sub.add_parser(
+        "pack", help="pack JSON message to atomized binary"
+    )
     p_pack.add_argument("input")
     p_pack.add_argument("output")
     p_pack.add_argument(
-        "--extra", type=int, default=0, help="extra fountain packets for redundancy"
+        "--extra",
+        type=int,
+        default=0,
+        help="extra fountain packets for redundancy",
     )
     p_pack.set_defaults(func=cmd_pack)
 
@@ -219,17 +369,110 @@ def main(argv=None):
     p_sim.add_argument("input")
     p_sim.add_argument("output")
     p_sim.add_argument(
-        "--drop", type=float, default=0.3, help="probability to drop each atom [0..1]"
+        "--drop",
+        type=float,
+        default=0.3,
+        help="probability to drop each atom [0..1]",
     )
     p_sim.set_defaults(func=cmd_simulate)
+
+    p_wrap_sp = sub.add_parser(
+        "wrap-sp", help="wrap ASTRAL binary in CCSDS Space Packet"
+    )
+    p_wrap_sp.add_argument("input", help="ASTRAL binary stream")
+    p_wrap_sp.add_argument("output", help="Space Packet output file")
+    p_wrap_sp.add_argument(
+        "--msg-type",
+        default="DETECT",
+        help="message type (default: DETECT)",
+    )
+    p_wrap_sp.add_argument(
+        "--seq-count",
+        type=int,
+        default=None,
+        help="optional initial sequence counter (0-16383)",
+    )
+    p_wrap_sp.set_defaults(func=cmd_wrap_sp)
+
+    p_unwrap_sp = sub.add_parser(
+        "unwrap-sp", help="unwrap CCSDS Space Packet to ASTRAL"
+    )
+    p_unwrap_sp.add_argument("input", help="Space Packet input file")
+    p_unwrap_sp.set_defaults(func=cmd_unwrap_sp)
+
+    p_encode_rs = sub.add_parser(
+        "encode-rs",
+        help="protect an ASTRAL binary with CCSDS Reed-Solomon FEC",
+    )
+    p_encode_rs.add_argument("input", help="ASTRAL binary file")
+    p_encode_rs.add_argument("output", help="RS-protected output file")
+    p_encode_rs.add_argument(
+        "--e",
+        type=int,
+        default=16,
+        choices=[8, 16],
+        help="error-correction strength E=8 or E=16 (default: 16)",
+    )
+    p_encode_rs.set_defaults(func=cmd_encode_rs)
+
+    p_decode_rs = sub.add_parser(
+        "decode-rs",
+        help="decode a CCSDS RS-protected stream, correcting bit errors",
+    )
+    p_decode_rs.add_argument("input", help="RS-protected binary file")
+    p_decode_rs.add_argument("output", help="recovered ASTRAL binary file")
+    p_decode_rs.add_argument(
+        "--e",
+        type=int,
+        default=16,
+        choices=[8, 16],
+        help="error-correction strength used during encoding (default: 16)",
+    )
+    p_decode_rs.set_defaults(func=cmd_decode_rs)
+
+    p_frame_tm = sub.add_parser(
+        "frame-tm",
+        help="segment an ASTRAL binary into CCSDS TM Transfer Frames",
+    )
+    p_frame_tm.add_argument(
+        "input", help="ASTRAL binary (or RS-protected) file"
+    )
+    p_frame_tm.add_argument("output", help="TM wire stream output file")
+    p_frame_tm.add_argument(
+        "--scid",
+        type=int,
+        default=42,
+        help="Spacecraft ID 0-1023 (default: 42)",
+    )
+    p_frame_tm.add_argument(
+        "--vcid",
+        type=int,
+        default=0,
+        help="Virtual Channel ID 0-7 (default: 0)",
+    )
+    p_frame_tm.add_argument(
+        "--no-randomise",
+        action="store_true",
+        help="disable CCSDS pseudo-randomizer (default: randomiser ON)",
+    )
+    p_frame_tm.set_defaults(func=cmd_frame_tm)
+
+    p_deframe_tm = sub.add_parser(
+        "deframe-tm",
+        help="decode CCSDS TM Transfer Frames and recover the ASTRAL payload",
+    )
+    p_deframe_tm.add_argument("input", help="TM wire stream file")
+    p_deframe_tm.add_argument(
+        "--no-randomise",
+        action="store_true",
+        help="disable de-randomizer (must match encoding, default: ON)",
+    )
+    p_deframe_tm.set_defaults(func=cmd_deframe_tm)
 
     p_pack_text = sub.add_parser("pack-text", help="pack a TEXT message")
     p_pack_text.add_argument("text")
     p_pack_text.add_argument("output")
     p_pack_text.add_argument("--extra", type=int, default=0)
-    p_pack_text.add_argument(
-        "--refine", type=int, default=0, help="extra REFINE packets"
-    )
     p_pack_text.set_defaults(func=cmd_pack_text)
 
     p_pack_text_dict = sub.add_parser(
@@ -239,10 +482,11 @@ def main(argv=None):
     p_pack_text_dict.add_argument("text")
     p_pack_text_dict.add_argument("output")
     p_pack_text_dict.add_argument("--extra", type=int, default=0)
-    p_pack_text_dict.add_argument("--refine", type=int, default=0)
     p_pack_text_dict.set_defaults(func=cmd_pack_text_dict)
 
-    p_pack_voice = sub.add_parser("pack-voice", help="pack a VOICE message from WAV")
+    p_pack_voice = sub.add_parser(
+        "pack-voice", help="pack a VOICE message from WAV"
+    )
     p_pack_voice.add_argument("input")
     p_pack_voice.add_argument("output")
     p_pack_voice.add_argument("--extra", type=int, default=0)
@@ -255,12 +499,15 @@ def main(argv=None):
     p_unpack_voice.add_argument("output")
     p_unpack_voice.set_defaults(func=cmd_unpack_voice)
 
-    p_pack_cmd = sub.add_parser("pack-cmd", help="pack a CMD message from JSON string")
+    p_pack_cmd = sub.add_parser(
+        "pack-cmd", help="pack a CMD message from JSON string"
+    )
     p_pack_cmd.add_argument("json")
     p_pack_cmd.add_argument("output")
     p_pack_cmd.add_argument("--extra", type=int, default=0)
-    p_pack_cmd.add_argument("--refine", type=int, default=0)
-    p_pack_cmd.add_argument("--key", help="hex key for HMAC auth", default=None)
+    p_pack_cmd.add_argument(
+        "--key", help="hex key for HMAC auth", default=None
+    )
     p_pack_cmd.set_defaults(func=cmd_pack_cmd)
 
     p_pack_cmd_batch = sub.add_parser(
@@ -269,18 +516,8 @@ def main(argv=None):
     p_pack_cmd_batch.add_argument("json")
     p_pack_cmd_batch.add_argument("output")
     p_pack_cmd_batch.add_argument("--extra", type=int, default=0)
-    p_pack_cmd_batch.add_argument("--refine", type=int, default=0)
     p_pack_cmd_batch.add_argument(
         "--key", help="hex key for HMAC over batch", default=None
-    )
-    p_pack_cmd_batch.add_argument(
-        "--key-id", type=int, default=0, help="key slot id (0-255)"
-    )
-    p_pack_cmd_batch.add_argument(
-        "--counter", type=int, default=0, help="anti-replay counter"
-    )
-    p_pack_cmd_batch.add_argument(
-        "--contact", help="contact windows 'start-end,start-end' seconds", default=None
     )
     p_pack_cmd_batch.set_defaults(func=cmd_pack_cmd_batch)
 

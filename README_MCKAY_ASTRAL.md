@@ -10,7 +10,7 @@ This system combines **McKay's extreme compression algorithms** with your existi
 
 **GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
 
-**License**: MIT License with Attribution Requirement - See [LICENSE](../LICENSE) for details.
+**License**: MIT License with Attribution Requirement - See [LICENSE](LICENSE) for details.
 
 ## 🎯 Key Features
 
@@ -293,7 +293,7 @@ The McKay + ASTRAL system provides **extreme compression** for deep space commun
 
 **GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
 
-**License**: MIT License with Attribution Requirement - See [LICENSE](../LICENSE) for details.
+**License**: MIT License with Attribution Requirement - See [LICENSE](LICENSE) for details.
 
 *This project requires attribution to the original creator when used or distributed. Please see the LICENSE file for complete requirements.*
 

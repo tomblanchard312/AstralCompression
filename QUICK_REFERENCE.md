@@ -12,7 +12,7 @@
 
 **GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
 
-**License**: MIT License with Attribution Requirement - See [LICENSE](../LICENSE) for details.
+**License**: MIT License with Attribution Requirement - See [LICENSE](LICENSE) for details.
 
 ## 🔧 Quick Start
 
@@ -48,17 +48,22 @@ recovered, data_type, metadata = mckay.unpack_mckay_message_atomized(atomized)
 | **VOICE** | 1.04x | Delta encoding, MCKAY_VOICE markers | ✅ 100% |
 | **VIDEO** | Variable | Frame analysis, zlib integration | ✅ 100% |
 
-## 🧪 Testing Commands
+## Maintained Command Set
 
 ```bash
-# Test GIST-first atomized system
-python test_mckay_gist_first.py
+# Show available CLI workflows
+python -m astral.cli --help
 
-# Test McKay + Fountain integration
-python test_mckay_fountain_corrected.py
+# Minimal end-to-end atomized flow
+python -m astral.cli pack examples/detect.json out.bin
+python -m astral.cli simulate out.bin lossy.bin --drop 0.4
+python -m astral.cli unpack lossy.bin
 
-# Test multiple data types
-python test_mckay_fountain_multitype.py
+# Validate Space Packet wrapper integration
+python PHASE3_SPACEPACKET_VERIFICATION.py
+
+# Run maintained module tests
+python -m pytest tests
 ```
 
 ## 🔍 Key Methods
@@ -94,7 +99,7 @@ python test_mckay_fountain_multitype.py
 
 **GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
 
-**License**: MIT License with Attribution Requirement - See [LICENSE](../LICENSE) for details.
+**License**: MIT License with Attribution Requirement - See [LICENSE](LICENSE) for details.
 
 *This project requires attribution to the original creator when used or distributed. Please see the LICENSE file for complete requirements.*
 

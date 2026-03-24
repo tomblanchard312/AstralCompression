@@ -51,7 +51,7 @@ ASTRAL now includes **Dr. Rodney McKay's revolutionary extreme compression algor
 ### 🇨🇦 McKay + ASTRAL System
 - **📖 Full Integration Guide**: [MCKAY_ASTRAL_INTEGRATION.md](MCKAY_ASTRAL_INTEGRATION.md)
 - **🚀 Quick Reference**: [QUICK_REFERENCE.md](QUICK_REFERENCE.md)
-- **🧪 Test GIST-First System**: `python test_mckay_gist_first.py`
+- **✅ Use the core CLI**: `python -m astral.cli --help`
 
 ### Basic ASTRAL Operations
 ```bash
@@ -66,21 +66,24 @@ python -m astral.cli unpack lossy.bin
 ```
 
 ### 🇨🇦 McKay + ASTRAL GIST-First System
+Use the maintained `astral.cli` commands shown above for packaging,
+loss simulation, and decoding workflows.
+
+### Maintained Command Set
 ```bash
-# Test McKay + Fountain with GIST-first atomized packets
-python test_mckay_gist_first.py
+# Show available CLI workflows
+python -m astral.cli --help
 
-# Test McKay + Fountain integration (corrected validation)
-python test_mckay_fountain_corrected.py
+# Minimal end-to-end atomized flow
+python -m astral.cli pack examples/detect.json out.bin
+python -m astral.cli simulate out.bin lossy.bin --drop 0.4
+python -m astral.cli unpack lossy.bin
 
-# Test multiple data types with McKay
-python test_mckay_fountain_multitype.py
+# Validate Space Packet wrapper integration
+python PHASE3_SPACEPACKET_VERIFICATION.py
 
-# Test basic McKay + Fountain integration
-python test_mckay_fountain_integration.py
-
-# Debug McKay compression/decompression cycle
-python debug_mckay_decompression.py
+# Run maintained module tests
+python -m pytest tests
 ```
 
 ## File format (high level)

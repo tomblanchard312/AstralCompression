@@ -1,0 +1,771 @@
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+Invalid -W option ignored: invalid module name: 'requests.packages.urllib3.exceptions'
+.\PHASE3_SPACEPACKET_VERIFICATION.py:27:1: F401 'json' imported but unused
+.\PHASE3_SPACEPACKET_VERIFICATION.py:53:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:61:80: E501 line too long (84 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:62:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:63:5: F401 'astral.pack_message_sp as exported_pack_sp' imported but unused
+.\PHASE3_SPACEPACKET_VERIFICATION.py:63:5: F401 'astral.unpack_stream_sp as exported_unpack_sp' imported but unused
+.\PHASE3_SPACEPACKET_VERIFICATION.py:80:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:84:80: E501 line too long (81 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:88:80: E501 line too long (94 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:89:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:92:80: E501 line too long (100 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:93:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:109:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:116:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:123:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:124:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:128:80: E501 line too long (82 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:129:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:130:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:136:80: E501 line too long (82 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:138:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:156:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:161:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:166:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:169:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:175:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:176:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:176:80: E501 line too long (89 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:177:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:177:80: E501 line too long (89 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:178:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:179:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:180:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:196:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:201:80: E501 line too long (91 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:202:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:207:80: E501 line too long (81 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:209:80: E501 line too long (89 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:210:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:212:80: E501 line too long (90 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:213:80: E501 line too long (85 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:215:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:216:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:217:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:217:80: E501 line too long (84 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:218:80: E501 line too long (91 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:233:80: E501 line too long (80 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:234:80: E501 line too long (90 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:235:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:238:80: E501 line too long (95 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:239:80: E501 line too long (103 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:240:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:241:80: E501 line too long (94 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:242:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:254:80: E501 line too long (80 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:261:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:263:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:268:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:272:80: E501 line too long (84 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:275:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:276:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:277:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:277:80: E501 line too long (92 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:278:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:278:80: E501 line too long (89 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:298:80: E501 line too long (87 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:299:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:305:15: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:306:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:310:15: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:311:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:326:5: F401 'argparse' imported but unused
+.\PHASE3_SPACEPACKET_VERIFICATION.py:327:5: F401 'tempfile' imported but unused
+.\PHASE3_SPACEPACKET_VERIFICATION.py:328:5: F401 'os' imported but unused
+.\PHASE3_SPACEPACKET_VERIFICATION.py:329:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:335:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:336:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:337:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:338:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:342:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:343:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:359:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:363:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:367:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:368:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:369:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:370:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:390:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:394:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:395:80: E501 line too long (90 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:398:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:401:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:406:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:410:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:414:1: W293 blank line contains whitespace
+.\PHASE3_SPACEPACKET_VERIFICATION.py:415:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:416:11: F541 f-string is missing placeholders
+.\PHASE3_SPACEPACKET_VERIFICATION.py:416:80: E501 line too long (86 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:441:80: E501 line too long (81 > 79 characters)
+.\PHASE3_SPACEPACKET_VERIFICATION.py:447:80: E501 line too long (87 > 79 characters)
+.\astral\container.py:23:80: E501 line too long (83 > 79 characters)
+.\astral\mckay_astral_integration.py:18:1: F401 'typing.Optional' imported but unused
+.\astral\mckay_astral_integration.py:19:1: F401 'math' imported but unused
+.\astral\mckay_astral_integration.py:20:1: F401 're' imported but unused
+.\astral\mckay_astral_integration.py:22:1: F401 'time' imported but unused
+.\astral\mckay_astral_integration.py:24:1: F401 'base64' imported but unused
+.\astral\mckay_astral_integration.py:28:5: F401 'astral.fountain.lt_encode_blocks' imported but unused
+.\astral\mckay_astral_integration.py:28:5: F401 'astral.fountain.lt_decode_blocks' imported but unused
+.\astral\mckay_astral_integration.py:29:5: F401 'astral.codec.unpack_stream' imported but unused
+.\astral\mckay_astral_integration.py:30:5: F401 'astral.textpack.encode_text' imported but unused
+.\astral\mckay_astral_integration.py:30:5: F401 'astral.textpack.decode_text' imported but unused
+.\astral\mckay_astral_integration.py:31:5: F401 'astral.voice.encode_wav_to_bitstream' imported but unused
+.\astral\mckay_astral_integration.py:31:5: F401 'astral.voice.decode_bitstream_to_wav' imported but unused
+.\astral\mckay_astral_integration.py:304:9: F811 redefinition of unused 're' from line 20
+.\astral\mckay_astral_integration.py:392:31: E203 whitespace before ':'
+.\astral\mckay_astral_integration.py:427:9: E722 do not use bare 'except'
+.\astral\mckay_astral_integration.py:510:80: E501 line too long (84 > 79 characters)
+.\astral\mckay_astral_integration.py:528:33: E203 whitespace before ':'
+.\astral\mckay_astral_integration.py:545:13: E722 do not use bare 'except'
+.\astral\mckay_astral_integration.py:558:80: E501 line too long (82 > 79 characters)
+.\astral\mckay_astral_integration.py:559:80: E501 line too long (86 > 79 characters)
+.\astral\mckay_astral_integration.py:560:80: E501 line too long (85 > 79 characters)
+.\astral\mckay_astral_integration.py:571:80: E501 line too long (84 > 79 characters)
+.\astral\mckay_astral_integration.py:584:80: E501 line too long (113 > 79 characters)
+.\astral\mckay_astral_integration.py:592:80: E501 line too long (84 > 79 characters)
+.\astral\mckay_astral_integration.py:599:9: F841 local variable 'original_size' is assigned to but never used
+.\astral\mckay_astral_integration.py:600:9: F841 local variable 'compressed_size' is assigned to but never used
+.\astral\mckay_astral_integration.py:601:9: F841 local variable 'compression_ratio' is assigned to but never used
+.\astral\mckay_astral_integration.py:622:13: E722 do not use bare 'except'
+.\astral\mckay_astral_integration.py:665:54: E203 whitespace before ':'
+.\astral\mckay_astral_integration.py:678:54: E203 whitespace before ':'
+.\astral\mckay_astral_integration.py:689:36: E203 whitespace before ':'
+.\astral\mckay_astral_integration.py:696:57: E203 whitespace before ':'
+.\astral\mckay_astral_integration.py:700:36: E203 whitespace before ':'
+.\astral\mckay_astral_integration.py:739:57: E203 whitespace before ':'
+.\astral\mckay_astral_integration.py:765:13: F841 local variable 'frame_size' is assigned to but never used
+.\astral\mckay_astral_integration.py:765:54: E203 whitespace before ':'
+.\astral\mckay_astral_integration.py:773:58: E203 whitespace before ':'
+.\astral\mckay_astral_integration.py:777:37: E203 whitespace before ':'
+.\astral\mckay_astral_integration.py:785:25: E722 do not use bare 'except'
+.\astral\mckay_astral_integration.py:815:57: E203 whitespace before ':'
+.\astral\mckay_astral_integration.py:852:57: E203 whitespace before ':'
+.\astral\mckay_astral_integration.py:860:80: E501 line too long (87 > 79 characters)
+.\astral\mckay_astral_integration.py:904:80: E501 line too long (83 > 79 characters)
+.\astral\mckay_astral_integration.py:926:80: E501 line too long (83 > 79 characters)
+.\astral\mckay_astral_integration.py:934:80: E501 line too long (80 > 79 characters)
+.\astral\mckay_astral_integration.py:959:18: E203 whitespace before ':'
+.\astral\mckay_astral_integration.py:959:80: E501 line too long (82 > 79 characters)
+.\astral\mckay_astral_integration.py:963:13: F811 redefinition of unused 'lt_encode_blocks' from line 28
+.\astral\mckay_astral_integration.py:971:31: E203 whitespace before ':'
+.\astral\mckay_astral_integration.py:995:80: E501 line too long (80 > 79 characters)
+.\astral\mckay_astral_integration.py:1033:17: F811 redefinition of unused 'lt_decode_blocks' from line 28
+.\astral\mckay_astral_integration.py:1061:43: E203 whitespace before ':'
+.\astral\mckay_astral_integration.py:1061:80: E501 line too long (84 > 79 characters)
+.\astral\mckay_astral_integration.py:1068:13: F841 local variable 'fountain_seed' is assigned to but never used
+.\astral\mckay_astral_integration.py:1084:80: E501 line too long (81 > 79 characters)
+.\astral\mckay_astral_integration.py:1087:80: E501 line too long (102 > 79 characters)
+.\astral\mckay_astral_integration.py:1101:80: E501 line too long (98 > 79 characters)
+.\astral\mckay_astral_integration.py:1121:80: E501 line too long (87 > 79 characters)
+.\astral\mckay_astral_integration.py:1125:80: E501 line too long (80 > 79 characters)
+.\astral\mckay_astral_integration.py:1126:80: E501 line too long (83 > 79 characters)
+.\astral\mckay_astral_integration.py:1130:80: E501 line too long (83 > 79 characters)
+.\astral\mckay_astral_integration.py:1132:80: E501 line too long (83 > 79 characters)
+.\astral\mckay_astral_integration.py:1140:80: E501 line too long (85 > 79 characters)
+.\astral\mckay_astral_integration.py:1146:80: E501 line too long (81 > 79 characters)
+.\astral\mckay_astral_integration.py:1155:80: E501 line too long (83 > 79 characters)
+.\astral\mckay_astral_integration.py:1156:80: E501 line too long (83 > 79 characters)
+.\astral\mckay_astral_integration.py:1171:80: E501 line too long (83 > 79 characters)
+.\astral\mckay_astral_integration.py:1173:80: E501 line too long (83 > 79 characters)
+.\astral\mckay_astral_integration.py:1196:80: E501 line too long (82 > 79 characters)
+.\astral\mckay_astral_integration.py:1239:72: W291 trailing whitespace
+.\astral\mckay_astral_integration.py:1240:80: E501 line too long (80 > 79 characters)
+.\astral\mckay_astral_integration.py:1240:81: W291 trailing whitespace
+.\astral\mckay_astral_integration.py:1241:73: W291 trailing whitespace
+.\astral\mckay_astral_integration.py:1242:80: W291 trailing whitespace
+.\astral\mckay_astral_integration.py:1259:15: F541 f-string is missing placeholders
+.\astral\mckay_astral_integration.py:1264:15: F541 f-string is missing placeholders
+.\astral\mckay_astral_integration.py:1265:80: E501 line too long (85 > 79 characters)
+.\astral\mckay_astral_integration.py:1266:80: E501 line too long (84 > 79 characters)
+.\astral\mckay_astral_integration.py:1270:80: E501 line too long (84 > 79 characters)
+.\astral\mckay_astral_integration.py:1272:80: E501 line too long (84 > 79 characters)
+.\astral\mckay_astral_integration.py:1284:11: F541 f-string is missing placeholders
+.\astral\mckay_astral_integration.py:1288:9: F841 local variable 'encoded_binary' is assigned to but never used
+.\astral\mckay_astral_integration.py:1289:80: E501 line too long (81 > 79 characters)
+.\astral\mckay_astral_integration.py:1292:80: E501 line too long (86 > 79 characters)
+.\astral\mckay_astral_integration.py:1300:11: F541 f-string is missing placeholders
+.\astral\mckay_astral_integration.py:1302:80: E501 line too long (85 > 79 characters)
+.\astral\mckay_astral_integration.py:1306:9: F841 local variable 'encoded_large' is assigned to but never used
+.\astral\mckay_astral_integration.py:1307:80: E501 line too long (80 > 79 characters)
+.\astral\mckay_astral_integration.py:1310:80: E501 line too long (95 > 79 characters)
+.\astral\mckay_astral_integration.py:1318:11: F541 f-string is missing placeholders
+.\astral\mckay_astral_integration.py:1322:9: F841 local variable 'encoded_voice' is assigned to but never used
+.\astral\mckay_astral_integration.py:1323:80: E501 line too long (80 > 79 characters)
+.\astral\mckay_astral_integration.py:1325:80: E501 line too long (87 > 79 characters)
+.\astral\mckay_astral_integration.py:1332:11: F541 f-string is missing placeholders
+.\astral\mckay_astral_integration.py:1336:9: F841 local variable 'encoded_video' is assigned to but never used
+.\astral\mckay_astral_integration.py:1337:80: E501 line too long (80 > 79 characters)
+.\astral\mckay_astral_integration.py:1339:80: E501 line too long (87 > 79 characters)
+.\astral\mckay_astral_integration.py:1346:11: F541 f-string is missing placeholders
+.\astral\mckay_astral_integration.py:1349:11: F541 f-string is missing placeholders
+.\astral\mckay_astral_integration.py:1350:11: F541 f-string is missing placeholders
+.\astral\mckay_astral_integration.py:1351:11: F541 f-string is missing placeholders
+.\astral\mckay_astral_integration.py:1352:11: F541 f-string is missing placeholders
+.\astral\mckay_astral_integration.py:1353:11: F541 f-string is missing placeholders
+.\astral\mckay_astral_integration.py:1354:11: F541 f-string is missing placeholders
+.\astral\mckay_astral_integration.py:1356:80: E501 line too long (85 > 79 characters)
+.\astral\mckay_astral_integration.py:1360:15: F541 f-string is missing placeholders
+.\astral\mckay_astral_integration.py:1362:15: F541 f-string is missing placeholders
+.\astral\mckay_usage_example.py:4:80: E501 line too long (87 > 79 characters)
+.\astral\mckay_usage_example.py:13:1: F401 'astral.mckay_astral_integration.McKayASTRALCompressor' imported but unused
+.\astral\mckay_usage_example.py:21:80: E501 line too long (81 > 79 characters)
+.\astral\mckay_usage_example.py:30:1: W293 blank line contains whitespace
+.\astral\mckay_usage_example.py:32:80: E501 line too long (91 > 79 characters)
+.\astral\mckay_usage_example.py:35:1: W293 blank line contains whitespace
+.\astral\mckay_usage_example.py:42:1: W293 blank line contains whitespace
+.\astral\mckay_usage_example.py:48:1: W293 blank line contains whitespace
+.\astral\mckay_usage_example.py:63:11: F541 f-string is missing placeholders
+.\astral\mckay_usage_example.py:66:80: E501 line too long (80 > 79 characters)
+.\astral\mckay_usage_example.py:71:80: E501 line too long (85 > 79 characters)
+.\astral\mckay_usage_example.py:85:42: E228 missing whitespace around modulo operator
+.\astral\mckay_usage_example.py:85:56: E228 missing whitespace around modulo operator
+.\astral\mckay_usage_example.py:97:11: F541 f-string is missing placeholders
+.\astral\mckay_usage_example.py:132:11: F541 f-string is missing placeholders
+.\astral\mckay_usage_example.py:161:80: E501 line too long (88 > 79 characters)
+.\astral\mckay_usage_example.py:165:11: F541 f-string is missing placeholders
+.\astral\mckay_usage_example.py:211:80: E501 line too long (84 > 79 characters)
+.\astral\mckay_usage_example.py:218:11: F541 f-string is missing placeholders
+.\astral\mckay_usage_example.py:225:11: F541 f-string is missing placeholders
+.\astral\mckay_usage_example.py:226:80: E501 line too long (81 > 79 characters)
+.\astral\mckay_usage_example.py:253:9: F841 local variable 'compressed' is assigned to but never used
+.\astral\mckay_usage_example.py:260:80: E501 line too long (130 > 79 characters)
+.\astral\mckay_usage_example.py:281:80: E501 line too long (86 > 79 characters)
+.\astral\voice.py:249:9: F841 local variable '_version' is assigned to but never used
+.\compress_text_demo.py:12:1: F401 'mckay_astral_integration.McKayASTRALIntegration' imported but unused
+.\compress_text_demo.py:12:1: E402 module level import not at top of file
+.\compress_text_demo.py:12:80: E501 line too long (82 > 79 characters)
+.\compress_text_demo.py:13:1: E402 module level import not at top of file
+.\compress_text_demo.py:14:1: F401 'random' imported but unused
+.\compress_text_demo.py:14:1: E402 module level import not at top of file
+.\compress_text_demo.py:22:1: W293 blank line contains whitespace
+.\compress_text_demo.py:26:1: W293 blank line contains whitespace
+.\compress_text_demo.py:28:80: E501 line too long (92 > 79 characters)
+.\compress_text_demo.py:28:93: W291 trailing whitespace
+.\compress_text_demo.py:29:80: E501 line too long (88 > 79 characters)
+.\compress_text_demo.py:29:89: W291 trailing whitespace
+.\compress_text_demo.py:30:80: E501 line too long (91 > 79 characters)
+.\compress_text_demo.py:30:92: W291 trailing whitespace
+.\compress_text_demo.py:32:1: W293 blank line contains whitespace
+.\compress_text_demo.py:40:1: W293 blank line contains whitespace
+.\compress_text_demo.py:48:1: W293 blank line contains whitespace
+.\compress_text_demo.py:54:1: W293 blank line contains whitespace
+.\compress_text_demo.py:59:1: W293 blank line contains whitespace
+.\compress_text_demo.py:64:1: W293 blank line contains whitespace
+.\compress_text_demo.py:71:1: W293 blank line contains whitespace
+.\compress_text_demo.py:77:1: W293 blank line contains whitespace
+.\compress_text_demo.py:83:1: W293 blank line contains whitespace
+.\compress_text_demo.py:89:1: W293 blank line contains whitespace
+.\compress_text_demo.py:95:1: W293 blank line contains whitespace
+.\compress_text_demo.py:116:80: E501 line too long (93 > 79 characters)
+.\compress_text_demo.py:124:80: E501 line too long (144 > 79 characters)
+.\compress_text_demo.py:125:80: E501 line too long (134 > 79 characters)
+.\compress_text_demo.py:126:80: E501 line too long (149 > 79 characters)
+.\compress_text_demo.py:148:80: E501 line too long (104 > 79 characters)
+.\compress_text_demo.py:163:11: F541 f-string is missing placeholders
+.\compress_text_demo.py:168:80: E501 line too long (108 > 79 characters)
+.\compress_text_demo.py:172:80: E501 line too long (81 > 79 characters)
+.\compress_text_demo.py:183:11: F541 f-string is missing placeholders
+.\compress_text_demo.py:188:80: E501 line too long (110 > 79 characters)
+.\compress_text_demo.py:192:80: E501 line too long (83 > 79 characters)
+.\compress_text_demo.py:211:11: F541 f-string is missing placeholders
+.\compress_text_demo.py:221:80: E501 line too long (81 > 79 characters)
+.\compress_text_demo.py:224:19: F541 f-string is missing placeholders
+.\compress_text_demo.py:234:11: F541 f-string is missing placeholders
+.\compress_text_demo.py:253:11: F541 f-string is missing placeholders
+.\compress_text_demo.py:260:80: E501 line too long (81 > 79 characters)
+.\compress_text_demo.py:262:11: F541 f-string is missing placeholders
+.\compress_text_demo.py:263:11: F541 f-string is missing placeholders
+.\compress_text_demo.py:264:11: F541 f-string is missing placeholders
+.\compress_text_demo.py:265:11: F541 f-string is missing placeholders
+.\compress_text_demo.py:266:11: F541 f-string is missing placeholders
+.\compress_text_demo.py:268:11: F541 f-string is missing placeholders
+.\compress_text_demo.py:269:11: F541 f-string is missing placeholders
+.\compress_text_demo.py:270:11: F541 f-string is missing placeholders
+.\compress_text_demo.py:271:11: F541 f-string is missing placeholders
+.\compress_text_demo.py:272:11: F541 f-string is missing placeholders
+.\compress_text_demo.py:295:15: F541 f-string is missing placeholders
+.\compress_text_demo.py:296:15: F541 f-string is missing placeholders
+.\compress_text_demo.py:296:80: E501 line too long (82 > 79 characters)
+.\compress_text_demo.py:297:15: F541 f-string is missing placeholders
+.\compress_text_demo.py:297:80: E501 line too long (86 > 79 characters)
+.\compress_video.py:12:1: E402 module level import not at top of file
+.\compress_video.py:13:1: E402 module level import not at top of file
+.\compress_video.py:14:1: F401 'struct' imported but unused
+.\compress_video.py:14:1: E402 module level import not at top of file
+.\compress_video.py:19:11: F541 f-string is missing placeholders
+.\compress_video.py:30:80: E501 line too long (85 > 79 characters)
+.\compress_video.py:33:11: F541 f-string is missing placeholders
+.\compress_video.py:43:11: F541 f-string is missing placeholders
+.\compress_video.py:47:11: F541 f-string is missing placeholders
+.\compress_video.py:57:15: F541 f-string is missing placeholders
+.\compress_video.py:60:80: E501 line too long (110 > 79 characters)
+.\compress_video.py:77:19: F541 f-string is missing placeholders
+.\compress_video.py:81:19: F541 f-string is missing placeholders
+.\compress_video.py:82:80: E501 line too long (88 > 79 characters)
+.\compress_video.py:84:80: E501 line too long (99 > 79 characters)
+.\compress_video.py:87:80: E501 line too long (122 > 79 characters)
+.\compress_video.py:106:11: F541 f-string is missing placeholders
+.\compress_video.py:117:15: F541 f-string is missing placeholders
+.\compress_video.py:122:15: F541 f-string is missing placeholders
+.\compress_video.py:127:80: E501 line too long (82 > 79 characters)
+.\compress_video.py:133:23: F541 f-string is missing placeholders
+.\compress_video.py:136:80: E501 line too long (116 > 79 characters)
+.\compress_video.py:162:15: F541 f-string is missing placeholders
+.\compress_video.py:164:15: F541 f-string is missing placeholders
+.\compress_video.py:164:80: E501 line too long (87 > 79 characters)
+.\compress_video.py:166:15: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:12:1: E402 module level import not at top of file
+.\compress_video_enhanced.py:13:1: E402 module level import not at top of file
+.\compress_video_enhanced.py:14:1: F401 'struct' imported but unused
+.\compress_video_enhanced.py:14:1: E402 module level import not at top of file
+.\compress_video_enhanced.py:15:1: F401 'shutil' imported but unused
+.\compress_video_enhanced.py:15:1: E402 module level import not at top of file
+.\compress_video_enhanced.py:20:11: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:24:15: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:25:15: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:28:15: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:31:15: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:34:15: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:40:11: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:51:80: E501 line too long (85 > 79 characters)
+.\compress_video_enhanced.py:54:11: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:64:5: F841 local variable 'video_format' is assigned to but never used
+.\compress_video_enhanced.py:67:11: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:74:11: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:90:80: E501 line too long (91 > 79 characters)
+.\compress_video_enhanced.py:97:11: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:100:80: E501 line too long (80 > 79 characters)
+.\compress_video_enhanced.py:113:80: E501 line too long (91 > 79 characters)
+.\compress_video_enhanced.py:121:15: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:129:37: E203 whitespace before ':'
+.\compress_video_enhanced.py:130:80: E501 line too long (81 > 79 characters)
+.\compress_video_enhanced.py:145:80: E501 line too long (82 > 79 characters)
+.\compress_video_enhanced.py:157:80: E501 line too long (95 > 79 characters)
+.\compress_video_enhanced.py:165:15: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:173:11: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:174:80: E501 line too long (81 > 79 characters)
+.\compress_video_enhanced.py:176:80: E501 line too long (136 > 79 characters)
+.\compress_video_enhanced.py:178:80: E501 line too long (83 > 79 characters)
+.\compress_video_enhanced.py:184:80: E501 line too long (83 > 79 characters)
+.\compress_video_enhanced.py:188:13: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:188:80: E501 line too long (98 > 79 characters)
+.\compress_video_enhanced.py:200:15: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:204:15: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:205:80: E501 line too long (84 > 79 characters)
+.\compress_video_enhanced.py:207:80: E501 line too long (95 > 79 characters)
+.\compress_video_enhanced.py:212:80: E501 line too long (85 > 79 characters)
+.\compress_video_enhanced.py:213:19: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:217:80: E501 line too long (90 > 79 characters)
+.\compress_video_enhanced.py:220:17: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:220:80: E501 line too long (119 > 79 characters)
+.\compress_video_enhanced.py:232:11: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:243:15: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:248:15: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:275:15: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:283:23: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:283:80: E501 line too long (86 > 79 characters)
+.\compress_video_enhanced.py:285:80: E501 line too long (102 > 79 characters)
+.\compress_video_enhanced.py:289:21: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:289:80: E501 line too long (87 > 79 characters)
+.\compress_video_enhanced.py:292:21: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:292:80: E501 line too long (97 > 79 characters)
+.\compress_video_enhanced.py:295:21: F541 f-string is missing placeholders
+.\compress_video_enhanced.py:295:80: E501 line too long (110 > 79 characters)
+.\compress_video_enhanced.py:298:15: F541 f-string is missing placeholders
+.\mckay_comprehensive_test.py:14:1: F401 'os' imported but unused
+.\mckay_comprehensive_test.py:18:1: E402 module level import not at top of file
+.\mckay_comprehensive_test.py:18:80: E501 line too long (82 > 79 characters)
+.\mckay_comprehensive_test.py:19:1: E402 module level import not at top of file
+.\mckay_comprehensive_test.py:20:1: E402 module level import not at top of file
+.\mckay_comprehensive_test.py:21:1: E402 module level import not at top of file
+.\mckay_comprehensive_test.py:22:1: E402 module level import not at top of file
+.\mckay_comprehensive_test.py:34:1: W293 blank line contains whitespace
+.\mckay_comprehensive_test.py:36:80: E501 line too long (91 > 79 characters)
+.\mckay_comprehensive_test.py:39:1: W293 blank line contains whitespace
+.\mckay_comprehensive_test.py:46:1: W293 blank line contains whitespace
+.\mckay_comprehensive_test.py:52:1: W293 blank line contains whitespace
+.\mckay_comprehensive_test.py:59:80: E501 line too long (88 > 79 characters)
+.\mckay_comprehensive_test.py:64:37: E228 missing whitespace around modulo operator
+.\mckay_comprehensive_test.py:64:51: E228 missing whitespace around modulo operator
+.\mckay_comprehensive_test.py:70:80: E501 line too long (88 > 79 characters)
+.\mckay_comprehensive_test.py:74:80: E501 line too long (85 > 79 characters)
+.\mckay_comprehensive_test.py:78:5: F841 local variable 'compressed' is assigned to but never used
+.\mckay_comprehensive_test.py:80:80: E501 line too long (88 > 79 characters)
+.\mckay_comprehensive_test.py:104:80: E501 line too long (88 > 79 characters)
+.\mckay_comprehensive_test.py:112:80: E501 line too long (88 > 79 characters)
+.\mckay_comprehensive_test.py:120:5: F841 local variable 'compressed' is assigned to but never used
+.\mckay_comprehensive_test.py:122:80: E501 line too long (88 > 79 characters)
+.\mckay_comprehensive_test.py:150:80: E501 line too long (88 > 79 characters)
+.\mckay_comprehensive_test.py:158:80: E501 line too long (88 > 79 characters)
+.\mckay_comprehensive_test.py:164:5: F841 local variable 'compressed' is assigned to but never used
+.\mckay_comprehensive_test.py:166:80: E501 line too long (88 > 79 characters)
+.\mckay_comprehensive_test.py:190:80: E501 line too long (88 > 79 characters)
+.\mckay_comprehensive_test.py:206:80: E501 line too long (88 > 79 characters)
+.\mckay_comprehensive_test.py:212:5: F841 local variable 'compressed' is assigned to but never used
+.\mckay_comprehensive_test.py:214:80: E501 line too long (88 > 79 characters)
+.\mckay_comprehensive_test.py:239:80: E501 line too long (88 > 79 characters)
+.\mckay_comprehensive_test.py:252:80: E501 line too long (88 > 79 characters)
+.\mckay_comprehensive_test.py:258:5: F841 local variable 'compressed' is assigned to but never used
+.\mckay_comprehensive_test.py:260:80: E501 line too long (88 > 79 characters)
+.\mckay_comprehensive_test.py:281:80: E501 line too long (88 > 79 characters)
+.\mckay_comprehensive_test.py:294:80: E501 line too long (88 > 79 characters)
+.\mckay_comprehensive_test.py:300:5: F841 local variable 'compressed' is assigned to but never used
+.\mckay_comprehensive_test.py:302:80: E501 line too long (88 > 79 characters)
+.\mckay_comprehensive_test.py:339:80: E501 line too long (98 > 79 characters)
+.\mckay_comprehensive_test.py:354:15: F541 f-string is missing placeholders
+.\mckay_comprehensive_test.py:380:80: E501 line too long (86 > 79 characters)
+.\mckay_comprehensive_test.py:395:17: F841 local variable 'compressed' is assigned to but never used
+.\mckay_comprehensive_test.py:395:80: E501 line too long (81 > 79 characters)
+.\mckay_comprehensive_test.py:402:80: E501 line too long (142 > 79 characters)
+.\mckay_comprehensive_test.py:405:13: F841 local variable 'e' is assigned to but never used
+.\mckay_comprehensive_test.py:407:80: E501 line too long (92 > 79 characters)
+.\mckay_comprehensive_test.py:438:80: E501 line too long (86 > 79 characters)
+.\test_fountain_status.py:11:1: E402 module level import not at top of file
+.\test_fountain_status.py:12:1: F401 'random' imported but unused
+.\test_fountain_status.py:12:1: E402 module level import not at top of file
+.\test_fountain_status.py:26:11: F541 f-string is missing placeholders
+.\test_fountain_status.py:31:24: E203 whitespace before ':'
+.\test_fountain_status.py:31:80: E501 line too long (87 > 79 characters)
+.\test_fountain_status.py:40:15: F541 f-string is missing placeholders
+.\test_fountain_status.py:43:80: E501 line too long (86 > 79 characters)
+.\test_fountain_status.py:47:15: F541 f-string is missing placeholders
+.\test_fountain_status.py:53:19: F541 f-string is missing placeholders
+.\test_fountain_status.py:56:80: E501 line too long (84 > 79 characters)
+.\test_fountain_status.py:73:23: F541 f-string is missing placeholders
+.\test_fountain_status.py:74:23: F541 f-string is missing placeholders
+.\test_fountain_status.py:76:23: F541 f-string is missing placeholders
+.\test_fountain_status.py:81:19: F541 f-string is missing placeholders
+.\test_fountain_status.py:92:11: F541 f-string is missing placeholders
+.\test_fountain_status.py:109:15: F541 f-string is missing placeholders
+.\test_fountain_status.py:113:25: E203 whitespace before ':'
+.\test_fountain_status.py:123:15: F541 f-string is missing placeholders
+.\test_fountain_status.py:127:15: F541 f-string is missing placeholders
+.\test_fountain_status.py:133:19: F541 f-string is missing placeholders
+.\test_fountain_status.py:136:80: E501 line too long (87 > 79 characters)
+.\test_fountain_status.py:141:23: F541 f-string is missing placeholders
+.\test_fountain_status.py:159:23: F541 f-string is missing placeholders
+.\test_fountain_status.py:166:27: F541 f-string is missing placeholders
+.\test_fountain_status.py:167:27: F541 f-string is missing placeholders
+.\test_fountain_status.py:169:27: F541 f-string is missing placeholders
+.\test_fountain_status.py:171:23: F541 f-string is missing placeholders
+.\test_fountain_status.py:173:19: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:12:1: F401 'mckay_astral_integration.McKayASTRALIntegration' imported but unused
+.\test_mckay_fountain_corrected.py:12:1: E402 module level import not at top of file
+.\test_mckay_fountain_corrected.py:12:80: E501 line too long (82 > 79 characters)
+.\test_mckay_fountain_corrected.py:13:1: E402 module level import not at top of file
+.\test_mckay_fountain_corrected.py:14:1: E402 module level import not at top of file
+.\test_mckay_fountain_corrected.py:15:1: E402 module level import not at top of file
+.\test_mckay_fountain_corrected.py:16:1: E402 module level import not at top of file
+.\test_mckay_fountain_corrected.py:30:80: E501 line too long (86 > 79 characters)
+.\test_mckay_fountain_corrected.py:31:80: E501 line too long (87 > 79 characters)
+.\test_mckay_fountain_corrected.py:32:80: E501 line too long (85 > 79 characters)
+.\test_mckay_fountain_corrected.py:40:31: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:44:80: E501 line too long (83 > 79 characters)
+.\test_mckay_fountain_corrected.py:78:80: E501 line too long (83 > 79 characters)
+.\test_mckay_fountain_corrected.py:85:80: E501 line too long (81 > 79 characters)
+.\test_mckay_fountain_corrected.py:86:80: E501 line too long (88 > 79 characters)
+.\test_mckay_fountain_corrected.py:88:80: E501 line too long (93 > 79 characters)
+.\test_mckay_fountain_corrected.py:92:35: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:96:80: E501 line too long (96 > 79 characters)
+.\test_mckay_fountain_corrected.py:100:17: E722 do not use bare 'except'
+.\test_mckay_fountain_corrected.py:102:25: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:102:80: E501 line too long (87 > 79 characters)
+.\test_mckay_fountain_corrected.py:125:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:133:80: E501 line too long (85 > 79 characters)
+.\test_mckay_fountain_corrected.py:143:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:157:27: E203 whitespace before ':'
+.\test_mckay_fountain_corrected.py:180:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:185:80: E501 line too long (86 > 79 characters)
+.\test_mckay_fountain_corrected.py:191:80: E501 line too long (99 > 79 characters)
+.\test_mckay_fountain_corrected.py:195:80: E501 line too long (82 > 79 characters)
+.\test_mckay_fountain_corrected.py:201:15: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:205:80: E501 line too long (88 > 79 characters)
+.\test_mckay_fountain_corrected.py:208:15: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:219:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:226:80: E501 line too long (86 > 79 characters)
+.\test_mckay_fountain_corrected.py:233:19: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:235:80: E501 line too long (86 > 79 characters)
+.\test_mckay_fountain_corrected.py:239:19: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:259:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:266:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:274:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:282:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:299:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:303:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:304:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:305:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:306:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:307:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:309:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:318:80: E501 line too long (111 > 79 characters)
+.\test_mckay_fountain_corrected.py:322:15: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:323:15: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:325:15: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:326:15: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:328:15: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:329:15: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:331:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:332:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:333:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:334:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:336:80: E501 line too long (87 > 79 characters)
+.\test_mckay_fountain_corrected.py:338:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:339:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_corrected.py:340:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:12:1: F401 'mckay_astral_integration.McKayASTRALIntegration' imported but unused
+.\test_mckay_fountain_integration.py:12:1: E402 module level import not at top of file
+.\test_mckay_fountain_integration.py:12:80: E501 line too long (82 > 79 characters)
+.\test_mckay_fountain_integration.py:13:1: E402 module level import not at top of file
+.\test_mckay_fountain_integration.py:14:1: E402 module level import not at top of file
+.\test_mckay_fountain_integration.py:15:1: E402 module level import not at top of file
+.\test_mckay_fountain_integration.py:31:72: W291 trailing whitespace
+.\test_mckay_fountain_integration.py:32:80: E501 line too long (80 > 79 characters)
+.\test_mckay_fountain_integration.py:32:81: W291 trailing whitespace
+.\test_mckay_fountain_integration.py:33:73: W291 trailing whitespace
+.\test_mckay_fountain_integration.py:34:80: W291 trailing whitespace
+.\test_mckay_fountain_integration.py:39:80: E501 line too long (94 > 79 characters)
+.\test_mckay_fountain_integration.py:43:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:49:80: E501 line too long (84 > 79 characters)
+.\test_mckay_fountain_integration.py:54:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:60:27: E203 whitespace before ':'
+.\test_mckay_fountain_integration.py:81:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:86:80: E501 line too long (86 > 79 characters)
+.\test_mckay_fountain_integration.py:92:80: E501 line too long (99 > 79 characters)
+.\test_mckay_fountain_integration.py:96:80: E501 line too long (82 > 79 characters)
+.\test_mckay_fountain_integration.py:116:19: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:124:80: E501 line too long (91 > 79 characters)
+.\test_mckay_fountain_integration.py:133:80: E501 line too long (88 > 79 characters)
+.\test_mckay_fountain_integration.py:135:80: E501 line too long (80 > 79 characters)
+.\test_mckay_fountain_integration.py:138:80: E501 line too long (86 > 79 characters)
+.\test_mckay_fountain_integration.py:144:31: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:144:80: E501 line too long (85 > 79 characters)
+.\test_mckay_fountain_integration.py:145:31: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:147:80: E501 line too long (104 > 79 characters)
+.\test_mckay_fountain_integration.py:151:80: E501 line too long (87 > 79 characters)
+.\test_mckay_fountain_integration.py:153:33: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:153:80: E501 line too long (98 > 79 characters)
+.\test_mckay_fountain_integration.py:155:35: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:157:80: E501 line too long (108 > 79 characters)
+.\test_mckay_fountain_integration.py:160:35: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:171:19: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:173:15: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:176:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:193:15: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:200:80: E501 line too long (97 > 79 characters)
+.\test_mckay_fountain_integration.py:206:15: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:212:37: E203 whitespace before ':'
+.\test_mckay_fountain_integration.py:222:80: E501 line too long (80 > 79 characters)
+.\test_mckay_fountain_integration.py:230:80: E501 line too long (82 > 79 characters)
+.\test_mckay_fountain_integration.py:231:80: E501 line too long (84 > 79 characters)
+.\test_mckay_fountain_integration.py:235:15: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:250:80: E501 line too long (115 > 79 characters)
+.\test_mckay_fountain_integration.py:259:80: E501 line too long (85 > 79 characters)
+.\test_mckay_fountain_integration.py:273:80: E501 line too long (84 > 79 characters)
+.\test_mckay_fountain_integration.py:276:23: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:280:80: E501 line too long (87 > 79 characters)
+.\test_mckay_fountain_integration.py:284:80: E501 line too long (107 > 79 characters)
+.\test_mckay_fountain_integration.py:291:29: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:291:80: E501 line too long (88 > 79 characters)
+.\test_mckay_fountain_integration.py:293:31: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:295:80: E501 line too long (112 > 79 characters)
+.\test_mckay_fountain_integration.py:298:31: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:303:23: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:305:19: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:314:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:318:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:319:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:320:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:321:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:322:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:323:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:325:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:326:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:327:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:328:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_integration.py:329:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:12:1: F401 'mckay_astral_integration.McKayASTRALIntegration' imported but unused
+.\test_mckay_fountain_multitype.py:12:1: E402 module level import not at top of file
+.\test_mckay_fountain_multitype.py:12:80: E501 line too long (82 > 79 characters)
+.\test_mckay_fountain_multitype.py:13:1: E402 module level import not at top of file
+.\test_mckay_fountain_multitype.py:14:1: E402 module level import not at top of file
+.\test_mckay_fountain_multitype.py:15:1: E402 module level import not at top of file
+.\test_mckay_fountain_multitype.py:16:1: E402 module level import not at top of file
+.\test_mckay_fountain_multitype.py:30:80: E501 line too long (85 > 79 characters)
+.\test_mckay_fountain_multitype.py:31:80: E501 line too long (84 > 79 characters)
+.\test_mckay_fountain_multitype.py:32:80: E501 line too long (81 > 79 characters)
+.\test_mckay_fountain_multitype.py:86:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:94:80: E501 line too long (85 > 79 characters)
+.\test_mckay_fountain_multitype.py:104:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:116:27: E203 whitespace before ':'
+.\test_mckay_fountain_multitype.py:135:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:140:80: E501 line too long (86 > 79 characters)
+.\test_mckay_fountain_multitype.py:146:80: E501 line too long (99 > 79 characters)
+.\test_mckay_fountain_multitype.py:150:80: E501 line too long (82 > 79 characters)
+.\test_mckay_fountain_multitype.py:156:15: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:160:80: E501 line too long (88 > 79 characters)
+.\test_mckay_fountain_multitype.py:163:15: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:174:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:187:19: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:189:80: E501 line too long (86 > 79 characters)
+.\test_mckay_fountain_multitype.py:193:80: E501 line too long (84 > 79 characters)
+.\test_mckay_fountain_multitype.py:197:23: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:200:23: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:220:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:222:72: W291 trailing whitespace
+.\test_mckay_fountain_multitype.py:223:80: E501 line too long (80 > 79 characters)
+.\test_mckay_fountain_multitype.py:223:81: W291 trailing whitespace
+.\test_mckay_fountain_multitype.py:224:73: W291 trailing whitespace
+.\test_mckay_fountain_multitype.py:225:80: W291 trailing whitespace
+.\test_mckay_fountain_multitype.py:233:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:238:80: E501 line too long (81 > 79 characters)
+.\test_mckay_fountain_multitype.py:251:80: E501 line too long (82 > 79 characters)
+.\test_mckay_fountain_multitype.py:255:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:262:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:279:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:283:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:284:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:285:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:286:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:288:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:297:80: E501 line too long (111 > 79 characters)
+.\test_mckay_fountain_multitype.py:301:15: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:302:15: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:304:15: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:305:15: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:307:15: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:308:15: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:310:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:311:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:312:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:313:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:315:80: E501 line too long (87 > 79 characters)
+.\test_mckay_fountain_multitype.py:317:11: F541 f-string is missing placeholders
+.\test_mckay_fountain_multitype.py:318:11: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:12:1: E402 module level import not at top of file
+.\test_mckay_gist_first.py:13:1: E402 module level import not at top of file
+.\test_mckay_gist_first.py:14:1: F401 'random' imported but unused
+.\test_mckay_gist_first.py:14:1: E402 module level import not at top of file
+.\test_mckay_gist_first.py:19:80: E501 line too long (80 > 79 characters)
+.\test_mckay_gist_first.py:26:80: E501 line too long (108 > 79 characters)
+.\test_mckay_gist_first.py:29:11: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:45:11: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:47:11: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:49:11: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:50:80: E501 line too long (80 > 79 characters)
+.\test_mckay_gist_first.py:53:11: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:56:80: E501 line too long (81 > 79 characters)
+.\test_mckay_gist_first.py:67:80: E501 line too long (82 > 79 characters)
+.\test_mckay_gist_first.py:68:19: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:68:80: E501 line too long (80 > 79 characters)
+.\test_mckay_gist_first.py:70:19: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:72:19: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:78:11: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:88:80: E501 line too long (80 > 79 characters)
+.\test_mckay_gist_first.py:93:11: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:99:15: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:108:19: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:110:19: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:112:19: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:118:11: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:122:11: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:129:80: E501 line too long (94 > 79 characters)
+.\test_mckay_gist_first.py:131:80: E501 line too long (83 > 79 characters)
+.\test_mckay_gist_first.py:139:15: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:142:15: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:146:15: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:146:80: E501 line too long (84 > 79 characters)
+.\test_mckay_gist_first.py:148:11: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:160:80: E501 line too long (83 > 79 characters)
+.\test_mckay_gist_first.py:163:80: E501 line too long (86 > 79 characters)
+.\test_mckay_gist_first.py:168:19: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:174:23: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:179:80: E501 line too long (83 > 79 characters)
+.\test_mckay_gist_first.py:182:27: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:184:27: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:195:11: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:197:11: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:198:11: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:199:11: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:200:11: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:201:11: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:202:11: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:211:13: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:211:80: E501 line too long (95 > 79 characters)
+.\test_mckay_gist_first.py:214:13: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:214:80: E501 line too long (92 > 79 characters)
+.\test_mckay_gist_first.py:217:13: F541 f-string is missing placeholders
+.\test_mckay_gist_first.py:217:80: E501 line too long (96 > 79 characters)
+.\test_mckay_gist_first.py:220:15: F541 f-string is missing placeholders
+.\test_voice_optimization.py:12:1: E402 module level import not at top of file
+.\test_voice_optimization.py:13:1: E402 module level import not at top of file
+.\test_voice_optimization.py:14:1: E402 module level import not at top of file
+.\test_voice_optimization.py:15:1: E402 module level import not at top of file
+.\test_voice_optimization.py:39:11: F541 f-string is missing placeholders
+.\test_voice_optimization.py:45:80: E501 line too long (84 > 79 characters)
+.\test_voice_optimization.py:88:31: E203 whitespace before ':'
+.\test_voice_optimization.py:94:80: E501 line too long (88 > 79 characters)
+.\test_voice_optimization.py:106:15: F541 f-string is missing placeholders
+.\test_voice_optimization.py:124:80: E501 line too long (94 > 79 characters)
+.\test_voice_optimization.py:128:15: F541 f-string is missing placeholders
+.\test_voice_optimization.py:134:80: E501 line too long (83 > 79 characters)
+.\test_voice_optimization.py:143:80: E501 line too long (85 > 79 characters)
+.\test_voice_optimization.py:146:80: E501 line too long (116 > 79 characters)
+.\test_voice_optimization.py:150:11: F541 f-string is missing placeholders
+.\test_voice_optimization.py:154:15: F541 f-string is missing placeholders
+.\test_voice_optimization.py:162:15: F541 f-string is missing placeholders
+.\test_voice_optimization.py:166:31: E203 whitespace before ':'
+.\test_voice_optimization.py:184:80: E501 line too long (83 > 79 characters)
+.\test_voice_optimization.py:207:27: F541 f-string is missing placeholders
+.\test_voice_optimization.py:207:80: E501 line too long (81 > 79 characters)
+.\test_voice_optimization.py:208:27: F541 f-string is missing placeholders
+.\test_voice_optimization.py:210:80: E501 line too long (96 > 79 characters)
+.\test_voice_optimization.py:215:80: E501 line too long (98 > 79 characters)
+.\test_voice_optimization.py:221:19: F541 f-string is missing placeholders
+.\test_voice_optimization.py:223:15: F541 f-string is missing placeholders
+.\test_voice_optimization.py:231:15: F541 f-string is missing placeholders
+.\test_voice_optimization.py:232:15: F541 f-string is missing placeholders
+.\test_voice_optimization.py:234:15: F541 f-string is missing placeholders
+.\tests\test_basic.py:1:1: F401 'json' imported but unused
+.\tests\test_basic.py:1:12: E401 multiple imports on one line
+.\tests\test_basic.py:17:28: E712 comparison to True should be 'if cond is True:' or 'if cond:'
+.\tests\test_basic.py:34:22: E203 whitespace before ':'
+.\tests\test_comprehensive.py:1:1: F401 'json' imported but unused
+.\tests\test_comprehensive.py:3:1: F401 'tempfile' imported but unused
+.\tests\test_comprehensive.py:4:1: F401 'os' imported but unused
+.\tests\test_comprehensive.py:13:1: F401 'astral.grammar.make_gist_bits' imported but unused
+.\tests\test_comprehensive.py:13:1: F401 'astral.grammar.encode_payload' imported but unused
+.\tests\test_comprehensive.py:13:1: F401 'astral.grammar.decode_payload' imported but unused
+.\tests\test_comprehensive.py:38:31: E712 comparison to True should be 'if cond is True:' or 'if cond:'
+.\tests\test_comprehensive.py:39:80: E501 line too long (85 > 79 characters)
+.\tests\test_comprehensive.py:119:5: F841 local variable 'total_atoms' is assigned to but never used
+.\tests\test_comprehensive.py:125:26: E203 whitespace before ':'
+.\tests\test_comprehensive.py:132:80: E501 line too long (85 > 79 characters)
+.\tests\test_comprehensive.py:137:33: E712 comparison to True should be 'if cond is True:' or 'if cond:'
+.\tests\test_comprehensive.py:151:31: E712 comparison to True should be 'if cond is True:' or 'if cond:'
+.\tests\test_comprehensive.py:166:31: E712 comparison to True should be 'if cond is True:' or 'if cond:'
+.\tests\test_comprehensive.py:168:80: E501 line too long (83 > 79 characters)
