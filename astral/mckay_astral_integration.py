@@ -18,6 +18,10 @@ TRANSFORM_TELEMETRY = 0x02
 TRANSFORM_VOICE_C2 = 0x03
 TRANSFORM_BINARY_FLOAT = 0x04
 
+ENTROPY_LZMA = 0x00
+ENTROPY_ZLIB = 0x01
+ENTROPY_ZSTD = 0x02
+
 HEADER_SIZE = 8
 MAGIC = b"MK"
 
@@ -90,26 +94,27 @@ def _detect_type(data: bytes) -> str:
     return "BINARY"
 
 
-def _compress_text(data: bytes) -> tuple[int, bytes]:
-    """Returns (transform_id, payload_bytes)."""
-    if _RUST_AVAILABLE:
-        try:
-            return TRANSFORM_TEXT, _ac.compress_text(data)
-        except Exception:
-            pass  # Fall back to Python implementation
+def _compress_text(data: bytes) -> tuple[int, int, bytes]:
+    """Returns (transform_id, entropy_coder, payload_bytes)."""
+    # TODO: Fix Rust text compression
+    # if _RUST_AVAILABLE:
+    #     try:
+    #         return TRANSFORM_TEXT, ENTROPY_ZSTD, _ac.compress_text(data)
+    #     except Exception:
+    #         warnings.warn("Rust text compression failed, falling back to Python", UserWarning)
     
     abbr_bytes = _text_abbrev_encode(data)
 
     candidates = [
-        zlib.compress(abbr_bytes, 9),
-        lzma.compress(abbr_bytes, preset=9),
-        zlib.compress(data, 9),
-        lzma.compress(data, preset=9),
+        (ENTROPY_ZLIB, zlib.compress(abbr_bytes, 9)),
+        (ENTROPY_LZMA, lzma.compress(abbr_bytes, preset=9)),
+        (ENTROPY_ZLIB, zlib.compress(data, 9)),
+        (ENTROPY_LZMA, lzma.compress(data, preset=9)),
     ]
-    best = min(candidates, key=len)
+    best_entropy, best = min(candidates, key=lambda x: len(x[1]))
     if len(best) >= len(data):
-        return TRANSFORM_PASSTHROUGH, lzma.compress(data, preset=9)
-    return TRANSFORM_TEXT, best
+        return TRANSFORM_PASSTHROUGH, ENTROPY_LZMA, lzma.compress(data, preset=9)
+    return TRANSFORM_TEXT, best_entropy, best
 
 
 def _apply_case(word: str, case_flag: int) -> str:
@@ -195,13 +200,13 @@ def _auto_detect_channels(data: bytes) -> int:
     return best_ch
 
 
-def _compress_telemetry(data: bytes, channels: int) -> tuple[int, bytes]:
-    """Returns (TRANSFORM_TELEMETRY, payload_bytes)."""
+def _compress_telemetry(data: bytes, channels: int) -> tuple[int, int, bytes]:
+    """Returns (TRANSFORM_TELEMETRY, entropy_coder, payload_bytes)."""
     if _RUST_AVAILABLE:
         try:
-            return TRANSFORM_TELEMETRY, _ac.compress_telemetry(data, channels)
+            return TRANSFORM_TELEMETRY, ENTROPY_ZSTD, _ac.compress_telemetry(data, channels)
         except Exception:
-            pass  # Fall back to Python implementation
+            warnings.warn("Rust telemetry compression failed, falling back to Python", UserWarning)
     
     n_floats = len(data) // 4
     n_samples = n_floats // channels
@@ -223,25 +228,37 @@ def _compress_telemetry(data: bytes, channels: int) -> tuple[int, bytes]:
             span = 1.0
         meta.extend(struct.pack(">ff", mn, span))
 
-        q = [max(0, min(65535, round((v - mn) / span * 65535))) for v in vals]
+        # Changed from Q16 (65535) to Q12 (4095) for better precision
+        q = [max(0, min(4095, round((v - mn) / span * 4095))) for v in vals]
         firsts.extend(struct.pack(">H", q[0]))
-        d = [max(-32768, min(32767, q[i] - q[i - 1])) for i in range(1, len(q))]
+        d = [max(-2048, min(2047, q[i] - q[i - 1])) for i in range(1, len(q))]
         if d:
             deltas.extend(struct.pack(f">{len(d)}h", *d))
 
     payload = bytes(meta) + bytes(firsts) + bytes(deltas)
-    return TRANSFORM_TELEMETRY, lzma.compress(payload, preset=9)
+    return TRANSFORM_TELEMETRY, ENTROPY_LZMA, lzma.compress(payload, preset=9)
 
 
-def _decompress_telemetry(payload_bytes: bytes, original_length: int, channels: int) -> bytes:
+def _decompress_telemetry(payload_bytes: bytes, original_length: int, channels: int, entropy_coder: int) -> bytes:
     """Inverse of _compress_telemetry."""
-    if _RUST_AVAILABLE:
+    if _RUST_AVAILABLE and entropy_coder == ENTROPY_ZSTD:
         try:
             return _ac.decompress_telemetry(payload_bytes, original_length, channels)
         except Exception:
-            pass  # Fall back to Python implementation
+            warnings.warn("Rust telemetry decompression failed, falling back to Python", UserWarning)
     
-    payload = lzma.decompress(payload_bytes)
+    # Decompress using the appropriate entropy coder
+    if entropy_coder == ENTROPY_LZMA:
+        payload = lzma.decompress(payload_bytes)
+    elif entropy_coder == ENTROPY_ZSTD:
+        try:
+            import zstd
+            payload = zstd.decompress(payload_bytes)
+        except ImportError:
+            raise ValueError("zstd decompression not available - install with: pip install zstd")
+    else:
+        raise ValueError(f"Unsupported entropy coder for telemetry: 0x{entropy_coder:02X}")
+    
     n_floats = original_length // 4
     n_samples = n_floats // channels
 
@@ -266,9 +283,9 @@ def _decompress_telemetry(payload_bytes: bytes, original_length: int, channels: 
                 delta_b[off : off + (n_samples - 1) * 2],
             )
             for d in ds:
-                q.append(max(0, min(65535, q[-1] + d)))
+                q.append(max(0, min(4095, q[-1] + d)))  # Changed from 65535 to 4095 for Q12
 
-        result.append([mn + v / 65535.0 * span for v in q])
+        result.append([mn + v / 4095.0 * span for v in q])  # Changed from 65535 to 4095 for Q12
 
     out = bytearray()
     for t in range(n_samples):
@@ -277,7 +294,7 @@ def _decompress_telemetry(payload_bytes: bytes, original_length: int, channels: 
     return bytes(out)
 
 
-def _compress_voice(data: bytes, voice_bps: int) -> tuple[int, bytes]:
+def _compress_voice(data: bytes, voice_bps: int) -> tuple[int, int, bytes]:
     """
     Re-encode a VX voice bitstream using Codec2.
     Falls back to TRANSFORM_PASSTHROUGH if pycodec2 is unavailable.
@@ -295,10 +312,10 @@ def _compress_voice(data: bytes, voice_bps: int) -> tuple[int, bytes]:
             ImportWarning,
             stacklevel=4,
         )
-        return TRANSFORM_PASSTHROUGH, lzma.compress(data, preset=9)
+        return TRANSFORM_PASSTHROUGH, ENTROPY_LZMA, lzma.compress(data, preset=9)
 
     if len(data) < 11 or data[:2] != b"VX":
-        return TRANSFORM_PASSTHROUGH, lzma.compress(data, preset=9)
+        return TRANSFORM_PASSTHROUGH, ENTROPY_LZMA, lzma.compress(data, preset=9)
 
     try:
         from astral.voice import decode_bitstream_to_wav as _dec_wav
@@ -316,7 +333,7 @@ def _compress_voice(data: bytes, voice_bps: int) -> tuple[int, bytes]:
         os.remove(tmp_path)
         samples_orig = np.frombuffer(raw_pcm, dtype=np.int16).copy()
     except Exception:
-        return TRANSFORM_PASSTHROUGH, lzma.compress(data, preset=9)
+        return TRANSFORM_PASSTHROUGH, ENTROPY_LZMA, lzma.compress(data, preset=9)
 
     valid_bps = {700, 1200, 1300, 1400, 1600, 2400, 3200}
     if voice_bps not in valid_bps:
@@ -334,7 +351,7 @@ def _compress_voice(data: bytes, voice_bps: int) -> tuple[int, bytes]:
 
     hdr = struct.pack(">HII", voice_bps, n_frames_c2, len(samples_orig))
     padded_enc = encoded + bytes(n_frames_c2 * bpf - len(encoded))
-    return TRANSFORM_VOICE_C2, hdr + padded_enc
+    return TRANSFORM_VOICE_C2, 0xFF, hdr + padded_enc
 
 
 def _decompress_voice(payload_bytes: bytes) -> bytes:
@@ -361,16 +378,16 @@ def _decompress_voice(payload_bytes: bytes) -> bytes:
     return raw_pcm.tobytes()
 
 
-def _compress_binary(data: bytes) -> tuple[int, bytes]:
+def _compress_binary(data: bytes) -> tuple[int, int, bytes]:
     """
     For float32 arrays: reorder bytes to group exponents/mantissas.
     Otherwise plain LZMA.
     """
     if _RUST_AVAILABLE and len(data) >= 16 and len(data) % 4 == 0:
         try:
-            return TRANSFORM_BINARY_FLOAT, _ac.compress_binary_float(data)
+            return TRANSFORM_BINARY_FLOAT, ENTROPY_ZSTD, _ac.compress_binary_float(data)
         except Exception:
-            pass  # Fall back to Python implementation
+            warnings.warn("Rust binary float compression failed, falling back to Python", UserWarning)
     
     if len(data) >= 16 and len(data) % 4 == 0:
         n = len(data) // 4
@@ -382,21 +399,32 @@ def _compress_binary(data: bytes) -> tuple[int, bytes]:
         reordered_lzma = lzma.compress(reordered, preset=9)
         plain_lzma = lzma.compress(data, preset=9)
         if len(reordered_lzma) < len(plain_lzma):
-            return TRANSFORM_BINARY_FLOAT, reordered_lzma
-        return TRANSFORM_PASSTHROUGH, plain_lzma
+            return TRANSFORM_BINARY_FLOAT, ENTROPY_LZMA, reordered_lzma
+        return TRANSFORM_PASSTHROUGH, ENTROPY_LZMA, plain_lzma
 
-    return TRANSFORM_PASSTHROUGH, lzma.compress(data, preset=9)
+    return TRANSFORM_PASSTHROUGH, ENTROPY_LZMA, lzma.compress(data, preset=9)
 
 
-def _decompress_binary_float(payload_bytes: bytes, original_length: int) -> bytes:
+def _decompress_binary_float(payload_bytes: bytes, original_length: int, entropy_coder: int) -> bytes:
     """Inverse of float byte-reorder."""
-    if _RUST_AVAILABLE:
+    if _RUST_AVAILABLE and entropy_coder == ENTROPY_ZSTD:
         try:
             return _ac.decompress_binary_float(payload_bytes, original_length)
         except Exception:
-            pass  # Fall back to Python implementation
+            warnings.warn("Rust binary float decompression failed, falling back to Python", UserWarning)
     
-    reordered = lzma.decompress(payload_bytes)
+    # Decompress using the appropriate entropy coder
+    if entropy_coder == ENTROPY_LZMA:
+        reordered = lzma.decompress(payload_bytes)
+    elif entropy_coder == ENTROPY_ZSTD:
+        try:
+            import zstd
+            reordered = zstd.decompress(payload_bytes)
+        except ImportError:
+            raise ValueError("zstd decompression not available - install with: pip install zstd")
+    else:
+        raise ValueError(f"Unsupported entropy coder for binary float: 0x{entropy_coder:02X}")
+    
     n = original_length // 4
     out = bytearray(original_length)
     for i in range(n):
@@ -423,7 +451,7 @@ def compress(
             MAGIC
             + bytes([MCKAY_VERSION, TRANSFORM_PASSTHROUGH])
             + _pack_u16(0)
-            + bytes([0, 0])
+            + bytes([0, ENTROPY_LZMA])
             + payload
         )
 
@@ -431,23 +459,25 @@ def compress(
         data_type = _detect_type(data)
 
     if data_type == "TEXT":
-        tid, payload = _compress_text(data)
+        tid, entropy_coder, payload = _compress_text(data)
     elif data_type == "TELEMETRY":
         ch = channels if channels > 0 else _auto_detect_channels(data)
-        tid, payload = _compress_telemetry(data, ch)
+        tid, entropy_coder, payload = _compress_telemetry(data, ch)
         channels = ch
     elif data_type == "VOICE":
-        tid, payload = _compress_voice(data, voice_bps)
+        tid, entropy_coder, payload = _compress_voice(data, voice_bps)
     elif data_type == "BINARY":
-        tid, payload = _compress_binary(data)
+        tid, entropy_coder, payload = _compress_binary(data)
     else:
-        tid, payload = TRANSFORM_PASSTHROUGH, lzma.compress(data, preset=9)
+        tid, entropy_coder, payload = TRANSFORM_PASSTHROUGH, ENTROPY_LZMA, lzma.compress(data, preset=9)
 
     if len(payload) >= len(data):
         tid = TRANSFORM_PASSTHROUGH
+        entropy_coder = ENTROPY_LZMA
         payload = lzma.compress(data, preset=9)
     if len(payload) >= len(data):
         tid = TRANSFORM_PASSTHROUGH
+        entropy_coder = 0xFF  # No entropy coding
         payload = data
 
     orig_len = min(len(data), 0xFFFF)
@@ -455,7 +485,7 @@ def compress(
         MAGIC
         + bytes([MCKAY_VERSION, tid])
         + _pack_u16(orig_len)
-        + bytes([min(channels, 255), 0])
+        + bytes([min(channels, 255), entropy_coder])
     )
     return header + payload
 
@@ -473,36 +503,50 @@ def decompress(data: bytes) -> bytes:
     tid = data[3]
     orig_len = _unpack_u16(data[4:6])
     channels = data[6]
+    entropy_coder = data[7]
     payload = data[HEADER_SIZE:]
+
+    # Select decompressor based on entropy coder
+    def _entropy_decompress(payload: bytes) -> bytes:
+        if entropy_coder == ENTROPY_LZMA:
+            return lzma.decompress(payload)
+        elif entropy_coder == ENTROPY_ZLIB:
+            return zlib.decompress(payload)
+        elif entropy_coder == ENTROPY_ZSTD:
+            try:
+                import zstd
+                return zstd.decompress(payload)
+            except ImportError:
+                raise ValueError("zstd decompression not available - install with: pip install zstd")
+        elif entropy_coder == 0xFF:
+            # No entropy coding
+            return payload
+        else:
+            raise ValueError(f"Unknown entropy coder: 0x{entropy_coder:02X}")
 
     if tid == TRANSFORM_PASSTHROUGH:
         try:
-            return lzma.decompress(payload)
+            return _entropy_decompress(payload)
         except Exception:
             return payload
 
     if tid == TRANSFORM_TEXT:
-        for decomp in (lzma.decompress, zlib.decompress):
-            try:
-                plain = decomp(payload)
-                try:
-                    return _text_abbrev_decode(plain)
-                except Exception:
-                    return plain
-            except Exception:
-                continue
-        raise ValueError("TEXT payload decompression failed")
+        try:
+            plain = _entropy_decompress(payload)
+            return _text_abbrev_decode(plain)
+        except Exception:
+            raise ValueError("TEXT payload decompression failed")
 
     if tid == TRANSFORM_TELEMETRY:
         if channels == 0:
             channels = 1
-        return _decompress_telemetry(payload, orig_len, channels)
+        return _decompress_telemetry(payload, orig_len, channels, entropy_coder)
 
     if tid == TRANSFORM_VOICE_C2:
         return _decompress_voice(payload)
 
     if tid == TRANSFORM_BINARY_FLOAT:
-        return _decompress_binary_float(payload, orig_len)
+        return _decompress_binary_float(payload, orig_len, entropy_coder)
 
     raise ValueError(f"Unknown McKay v2 transform ID: 0x{tid:02X}")
 

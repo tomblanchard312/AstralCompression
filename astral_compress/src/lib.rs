@@ -3,7 +3,6 @@ use pyo3::exceptions::PyValueError;
 use pyo3::types::PyBytes;
 use pyo3::Py;
 use zstd;
-use regex::Regex;
 
 /// Compress telemetry data using Q16 quantization and delta encoding with zstd compression
 #[pyfunction]
@@ -50,11 +49,11 @@ fn compress_telemetry(py: Python, data: &[u8], channels: usize) -> PyResult<Py<P
         meta.extend_from_slice(&mn.to_be_bytes());
         meta.extend_from_slice(&span.to_be_bytes());
         
-        // Quantize to Q16
+        // Quantize to Q12
         let mut q_vals = Vec::with_capacity(n_samples);
         for &val in &ch_vals {
-            let q = ((val - mn) / span * 65535.0).round() as u16;
-            let q = q.min(65535).max(0);
+            let q = ((val - mn) / span * 4095.0).round() as u16;
+            let q = q.min(4095).max(0);
             q_vals.push(q);
         }
         
@@ -65,7 +64,7 @@ fn compress_telemetry(py: Python, data: &[u8], channels: usize) -> PyResult<Py<P
         if n_samples > 1 {
             for i in 1..n_samples {
                 let delta = q_vals[i] as i32 - q_vals[i-1] as i32;
-                let delta = delta.max(-32768).min(32767) as i16;
+                let delta = delta.max(-2048).min(2047) as i16;
                 deltas.extend_from_slice(&delta.to_be_bytes());
             }
         }
@@ -83,7 +82,7 @@ fn compress_telemetry(py: Python, data: &[u8], channels: usize) -> PyResult<Py<P
     Ok(PyBytes::new_bound(py, &compressed).unbind())
 }
 
-/// Decompress telemetry data from zstd-compressed Q16 quantized format
+/// Decompress telemetry data from zstd-compressed Q12 quantized format
 #[pyfunction]
 #[pyo3(signature = (payload_bytes, original_length, channels))]
 fn decompress_telemetry(py: Python, payload_bytes: &[u8], original_length: usize, channels: usize) -> PyResult<Py<PyBytes>> {
@@ -132,13 +131,13 @@ fn decompress_telemetry(py: Python, payload_bytes: &[u8], original_length: usize
             for i in 0..(n_samples - 1) {
                 let delta_bytes = &delta_b[off + i*2..off + (i+1)*2];
                 let delta = i16::from_be_bytes([delta_bytes[0], delta_bytes[1]]);
-                let next_q = (q[i] as i32 + delta as i32).max(0).min(65535) as u16;
+                let next_q = (q[i] as i32 + delta as i32).max(0).min(4095) as u16;
                 q.push(next_q);
             }
         }
         
         for (i, &qv) in q.iter().enumerate() {
-            result[ch][i] = mn + (qv as f32) / 65535.0 * span;
+            result[ch][i] = mn + (qv as f32) / 4095.0 * span;
         }
     }
     
@@ -238,13 +237,26 @@ fn compress_text(py: Python, data: &[u8]) -> PyResult<Py<PyBytes>> {
     }
     
     // Tokenize and abbreviate - split on non-word chars but keep them (like Python re.split(r"(\W+)", text))
-    use regex::Regex;
-    let token_re = Regex::new(r"\w+|\W+").unwrap();
     let mut out_parts = Vec::new();
     let marker = "\x1e";
     
-    for token in token_re.find_iter(text) {
-        let token_str = token.as_str();
+    let mut chars = text.char_indices().peekable();
+    while let Some((start, ch)) = chars.next() {
+        let is_word = ch.is_alphanumeric() || ch == '_';
+        let mut end = start + ch.len_utf8();
+        
+        // Group consecutive characters of the same type
+        while let Some((next_end, next_ch)) = chars.peek() {
+            let next_is_word = next_ch.is_alphanumeric() || *next_ch == '_';
+            if next_is_word == is_word {
+                end = *next_end + next_ch.len_utf8();
+                chars.next();
+            } else {
+                break;
+            }
+        }
+        
+        let token_str = &text[start..end];
         if token_str.chars().all(|c| c.is_alphabetic()) {
             let lower = token_str.to_lowercase();
             if let Some(&abbr) = abbrevs.get(lower.as_str()) {
@@ -296,22 +308,57 @@ fn decompress_text(py: Python, data: &[u8]) -> PyResult<Py<PyBytes>> {
     }
     
     // Apply case and restore abbreviations
-    let repl_re = Regex::new(r"\x1e([0-9a-f]{2})([012])").unwrap();
-    let restored = repl_re.replace_all(text, |caps: &regex::Captures| {
-        let idx = u8::from_str_radix(&caps[1], 16).unwrap_or(0);
-        let flag = caps[2].parse::<u8>().unwrap_or(0);
-        if let Some(base) = id_to_abbrev.get(&idx) {
-            match flag {
-                1 => base.chars().enumerate().map(|(i, c)| if i == 0 { c.to_uppercase().next().unwrap() } else { c }).collect::<String>(),
-                2 => base.to_uppercase(),
-                _ => base.to_string(),
+    let mut result = String::new();
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1e' {
+            // Look for the pattern \x1e[0-9a-f]{2}[012]
+            let mut hex_str = String::new();
+            let mut flag_char = None;
+            
+            // Read next 2 characters for hex
+            for _ in 0..2 {
+                if let Some(next_ch) = chars.next() {
+                    hex_str.push(next_ch);
+                } else {
+                    break;
+                }
+            }
+            
+            // Read next character for flag
+            if let Some(next_ch) = chars.next() {
+                flag_char = Some(next_ch);
+            }
+            
+            if hex_str.len() == 2 && flag_char.is_some() {
+                if let Ok(idx) = u8::from_str_radix(&hex_str, 16) {
+                    if let Some(base) = id_to_abbrev.get(&idx) {
+                        let flag = flag_char.unwrap().to_digit(10).unwrap_or(0) as u8;
+                        let restored = match flag {
+                            1 => base.chars().enumerate().map(|(i, c)| 
+                                if i == 0 { c.to_uppercase().next().unwrap() } else { c }
+                            ).collect::<String>(),
+                            2 => base.to_uppercase(),
+                            _ => base.to_string(),
+                        };
+                        result.push_str(&restored);
+                        continue;
+                    }
+                }
+            }
+            
+            // If pattern doesn't match, output the original characters
+            result.push('\x1e');
+            result.push_str(&hex_str);
+            if let Some(fc) = flag_char {
+                result.push(fc);
             }
         } else {
-            caps[0].to_string()
+            result.push(ch);
         }
-    });
+    }
     
-    Ok(PyBytes::new_bound(py, restored.as_bytes()).unbind())
+    Ok(PyBytes::new_bound(py, result.as_bytes()).unbind())
 }
 
 /// Python module definition

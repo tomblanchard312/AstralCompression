@@ -17,7 +17,7 @@ dependencies = []
 [project.optional-dependencies]
 rs    = ["reedsolo>=1.7"]
 voice = ["pycodec2>=4.0", "numpy>=1.24"]
-fast = ["astral-compress>=0.1.0"]
+fast = ["astral-compress>=0.1.0", "zstd>=1.5"]
 all   = ["reedsolo>=1.7", "pycodec2>=4.0", "numpy>=1.24", "astral-compress>=0.1.0"]
 
 [project.urls]
