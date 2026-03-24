@@ -4,6 +4,7 @@ from .container import make_atom, parse_atoms
 from .container import HEADER_GIST, FOUNTAIN_PACKET
 from .grammar import make_gist_bits, encode_payload, decode_payload
 from .spacepacket import SpacePacketSequenceCounter, wrap as _sp_wrap
+from .rs_fec import encode_stream as _rs_encode, decode_stream as _rs_decode
 from .grammar import parse_gist
 from .textpack import encode_text, decode_text
 from .commands import (
@@ -406,5 +407,84 @@ def unpack_stream_sp(packet: bytes) -> dict:
         "packet_type": sp["packet_type"],
         "seq_count": sp["seq_count"],
         "msg_type": sp["msg_type"],
+        **astral_result,
+    }
+
+
+def pack_message_rs(
+    msg: dict,
+    message_id: int | None = None,
+    extra_fountain: int = 0,
+    e: int = 16,
+) -> bytes:
+    """
+    Pack a message and protect every atom with CCSDS Reed-Solomon FEC.
+
+    Parameters
+    ----------
+    msg : dict
+        Message dict with at least a ``type`` key.
+    message_id : int, optional
+        ASTRAL message ID. Generated randomly if omitted.
+    extra_fountain : int
+        Extra fountain redundancy packets.
+    e : int
+        RS error-correction strength: ``8`` (corrects <=8 byte errors/atom)
+        or ``16`` (corrects <=16 byte errors/atom). Default ``16``.
+
+    Returns
+    -------
+    bytes
+        RS-protected byte stream: one 64-byte (E=16) or 48-byte (E=8)
+        codeword per source atom.
+    """
+    astral_stream = pack_message(
+        msg, message_id=message_id, extra_fountain=extra_fountain
+    )
+    return _rs_encode(astral_stream, e=e)
+
+
+def unpack_stream_rs(rs_stream: bytes, e: int = 16) -> dict:
+    """
+    Decode an RS-protected stream produced by ``pack_message_rs``.
+
+    Corrects bit errors, drops uncorrectable atoms (the fountain code
+    recovers from the resulting erasures), then decodes the ASTRAL payload.
+
+    Parameters
+    ----------
+    rs_stream : bytes
+        RS-protected stream as produced by ``pack_message_rs`` or any
+        conforming encoder.
+    e : int
+        Must match the value used during encoding.
+
+    Returns
+    -------
+    dict
+        All keys from ``unpack_stream()``, plus:
+
+        ``rs_e`` : int
+            The E value used for decoding.
+        ``rs_corrected_symbols`` : int
+            Total RS symbols corrected across all codewords.
+        ``rs_uncorrectable_atoms`` : int
+            Atoms dropped because their codeword had more than E errors.
+
+        The function never raises. If RS decoding fails entirely it returns
+        ``{"error": "<reason>", "rs_e": e}``.
+    """
+    try:
+        astral_stream, n_corrected, n_uncorrectable = _rs_decode(
+            rs_stream, e=e
+        )
+    except (TypeError, ValueError) as exc:
+        return {"error": f"rs decode error: {exc}", "rs_e": e}
+
+    astral_result = unpack_stream(astral_stream)
+    return {
+        "rs_e": e,
+        "rs_corrected_symbols": n_corrected,
+        "rs_uncorrectable_atoms": n_uncorrectable,
         **astral_result,
     }

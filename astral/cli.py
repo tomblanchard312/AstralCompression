@@ -243,6 +243,59 @@ def cmd_unwrap_sp(args):
     return 0
 
 
+def cmd_encode_rs(args):
+    """Apply RS FEC to an ASTRAL binary file."""
+    try:
+        from .rs_fec import encode_stream, CODEWORD_SIZE
+
+        atom_stream = read_bin(args.input)
+        if len(atom_stream) % 32 != 0:
+            print(
+                f"Error: input length {len(atom_stream)} "
+                "is not a multiple of 32. "
+                "Is this a valid ASTRAL stream?"
+            )
+            return 1
+        rs_stream = encode_stream(atom_stream, e=args.e)
+        write_bin(args.output, rs_stream)
+        n_atoms = len(atom_stream) // 32
+        print(
+            f"RS-E{args.e} encoded {n_atoms} atoms: "
+            f"{len(atom_stream)} -> {len(rs_stream)} bytes "
+            f"(codeword_size={CODEWORD_SIZE[args.e]})"
+        )
+    except Exception as exc:
+        print(f"Error encoding RS stream: {exc}")
+        return 1
+    return 0
+
+
+def cmd_decode_rs(args):
+    """Decode an RS-protected stream, correcting bit errors."""
+    try:
+        from .rs_fec import decode_stream, CODEWORD_SIZE
+
+        rs_stream = read_bin(args.input)
+        atom_stream, n_corrected, n_uncorrectable = decode_stream(
+            rs_stream, e=args.e
+        )
+        write_bin(args.output, atom_stream)
+        n_atoms = len(atom_stream) // 32
+        stats = {
+            "e": args.e,
+            "input_bytes": len(rs_stream),
+            "output_atoms": n_atoms,
+            "corrected_symbols": n_corrected,
+            "uncorrectable_atoms": n_uncorrectable,
+            "codeword_size": CODEWORD_SIZE[args.e],
+        }
+        print(json.dumps(stats, indent=2))
+    except Exception as exc:
+        print(f"Error decoding RS stream: {exc}")
+        return 1
+    return 0
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="astral")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -300,6 +353,36 @@ def main(argv=None):
     )
     p_unwrap_sp.add_argument("input", help="Space Packet input file")
     p_unwrap_sp.set_defaults(func=cmd_unwrap_sp)
+
+    p_encode_rs = sub.add_parser(
+        "encode-rs",
+        help="protect an ASTRAL binary with CCSDS Reed-Solomon FEC",
+    )
+    p_encode_rs.add_argument("input", help="ASTRAL binary file")
+    p_encode_rs.add_argument("output", help="RS-protected output file")
+    p_encode_rs.add_argument(
+        "--e",
+        type=int,
+        default=16,
+        choices=[8, 16],
+        help="error-correction strength E=8 or E=16 (default: 16)",
+    )
+    p_encode_rs.set_defaults(func=cmd_encode_rs)
+
+    p_decode_rs = sub.add_parser(
+        "decode-rs",
+        help="decode a CCSDS RS-protected stream, correcting bit errors",
+    )
+    p_decode_rs.add_argument("input", help="RS-protected binary file")
+    p_decode_rs.add_argument("output", help="recovered ASTRAL binary file")
+    p_decode_rs.add_argument(
+        "--e",
+        type=int,
+        default=16,
+        choices=[8, 16],
+        help="error-correction strength used during encoding (default: 16)",
+    )
+    p_decode_rs.set_defaults(func=cmd_decode_rs)
 
     p_pack_text = sub.add_parser("pack-text", help="pack a TEXT message")
     p_pack_text.add_argument("text")
