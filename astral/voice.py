@@ -38,7 +38,8 @@ def _read_wav_mono_16(path):
     # Downmix stereo to mono
     if nch == 2 and len(samples) % 2 == 0:
         samples = [
-            (samples[i * 2] + samples[i * 2 + 1]) // 2 for i in range(len(samples) // 2)
+            (samples[i * 2] + samples[i * 2 + 1]) // 2
+            for i in range(len(samples) // 2)
         ]
 
     # Simple resampling if needed
@@ -82,7 +83,8 @@ def encode_wav_to_bitstream(path):
 
     samples = preemphasis(samples)
     frames = [
-        samples[i : i + FRAME_SAMPLES] for i in range(0, len(samples), FRAME_SAMPLES)
+        samples[i:i + FRAME_SAMPLES]
+        for i in range(0, len(samples), FRAME_SAMPLES)
     ]
 
     if not frames:
@@ -250,6 +252,9 @@ def decode_bitstream_to_wav(data, out_path):
         bitbytes = data[11:]
     except Exception as e:
         raise ValueError(f"Failed to parse header: {e}")
+
+    if version != 1:
+        raise ValueError(f"Unsupported voice bitstream version: {version}")
 
     if nframes <= 0 or nbits <= 0:
         raise ValueError(f"Invalid header: nframes={nframes}, nbits={nbits}")

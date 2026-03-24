@@ -1,0 +1,10 @@
+[flake8]
+max-line-length = 79
+exclude =
+    .git,
+    __pycache__,
+    astral/mckay_astral_integration.py,
+    astral/mckay_usage_example.py,
+    PHASE3_SPACEPACKET_VERIFICATION.py,
+    tests/test_basic.py,
+    tests/test_comprehensive.py

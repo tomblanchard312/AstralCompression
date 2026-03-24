@@ -1,4 +1,5 @@
-import json, argparse
+import argparse
+import json
 from .codec import (
     pack_message,
     unpack_stream,
@@ -52,7 +53,10 @@ def cmd_pack(args):
         msg = read_json(args.input)
         blob = pack_message(msg, extra_fountain=args.extra)
         write_bin(args.output, blob)
-        print(f"Wrote {len(blob)} bytes to {args.output} ({len(blob)//32} atoms).")
+        print(
+            f"Wrote {len(blob)} bytes to {args.output} "
+            f"({len(blob)//32} atoms)."
+        )
     except Exception as e:
         print(f"Error packing message: {e}")
         return 1
@@ -78,14 +82,15 @@ def cmd_simulate(args):
         import random
 
         for i in range(0, len(data), atom_size):
-            atom = data[i : i + atom_size]
+            atom = data[i:i + atom_size]
             if len(atom) < atom_size:
                 break
             if random.random() >= args.drop:
                 out += atom
         write_bin(args.output, bytes(out))
         print(
-            f"Simulated drop rate {args.drop:.2f}. Input atoms={len(data)//32}, output atoms={len(out)//32}."
+            f"Simulated drop rate {args.drop:.2f}. "
+            f"Input atoms={len(data)//32}, output atoms={len(out)//32}."
         )
     except Exception as e:
         print(f"Error simulating packet loss: {e}")
@@ -95,12 +100,11 @@ def cmd_simulate(args):
 
 def cmd_pack_text(args):
     try:
-        blob = pack_text_message(
-            args.text, extra_fountain=args.extra, refine=args.refine
-        )
+        blob = pack_text_message(args.text, extra_fountain=args.extra)
         write_bin(args.output, blob)
         print(
-            f"Wrote {len(blob)} bytes to {args.output} ({len(blob)//32} atoms). TYPE=TEXT"
+            f"Wrote {len(blob)} bytes to {args.output} "
+            f"({len(blob)//32} atoms). TYPE=TEXT"
         )
     except Exception as e:
         print(f"Error packing text message: {e}")
@@ -112,11 +116,14 @@ def cmd_pack_text_dict(args):
     try:
         words = [w.strip() for w in args.words.split(",") if w.strip()]
         blob = pack_text_with_dict(
-            words, args.text, extra_fountain=args.extra, refine=args.refine
+            words,
+            args.text,
+            extra_fountain=args.extra,
         )
         write_bin(args.output, blob)
         print(
-            f"Wrote {len(blob)} bytes to {args.output} ({len(blob)//32} atoms). TYPE=TEXT with DICT_UPDATE"
+            f"Wrote {len(blob)} bytes to {args.output} "
+            f"({len(blob)//32} atoms). TYPE=TEXT with DICT_UPDATE"
         )
     except Exception as e:
         print(f"Error packing text with dictionary: {e}")
@@ -129,7 +136,8 @@ def cmd_pack_voice(args):
         blob = pack_voice_message(args.input, extra_fountain=args.extra)
         write_bin(args.output, blob)
         print(
-            f"Wrote {len(blob)} bytes to {args.output} ({len(blob)//32} atoms). TYPE=VOICE"
+            f"Wrote {len(blob)} bytes to {args.output} "
+            f"({len(blob)//32} atoms). TYPE=VOICE"
         )
     except Exception as e:
         print(f"Error packing voice message: {e}")
@@ -141,10 +149,14 @@ def cmd_unpack_voice(args):
     try:
         result = unpack_stream(read_bin(args.input))
         if not result.get("complete"):
-            print(json.dumps({"error": "incomplete", "gist": result.get("gist", {})}))
+            print(
+                json.dumps(
+                    {"error": "incomplete", "gist": result.get("gist", {})}
+                )
+            )
             return 0
-        msg = result.get("message", {})
-        if msg.get("type") != "VOICE":
+        msg = result.get("message")
+        if not isinstance(msg, dict) or msg.get("type") != "VOICE":
             print(json.dumps(result, indent=2))
             return 0
         data = msg.get("bytes", b"")
@@ -160,12 +172,11 @@ def cmd_pack_cmd(args):
     try:
         cmd = json.loads(args.json)
         key = bytes.fromhex(args.key) if args.key else None
-        blob = pack_cmd_message(
-            cmd, extra_fountain=args.extra, key=key, refine=args.refine
-        )
+        blob = pack_cmd_message(cmd, extra_fountain=args.extra, key=key)
         write_bin(args.output, blob)
         print(
-            f"Wrote {len(blob)} bytes to {args.output} ({len(blob)//32} atoms). TYPE=CMD"
+            f"Wrote {len(blob)} bytes to {args.output} "
+            f"({len(blob)//32} atoms). TYPE=CMD"
         )
     except Exception as e:
         print(f"Error packing command message: {e}")
@@ -177,25 +188,11 @@ def cmd_pack_cmd_batch(args):
     try:
         batch = json.loads(args.json)
         key = bytes.fromhex(args.key) if args.key else None
-        contact = None
-        if args.contact:
-            contact = []
-            for win in args.contact.split(","):
-                if "-" in win:
-                    s, e = win.split("-", 1)
-                    contact.append((int(s), int(e)))
-        blob = pack_cmd_batch(
-            batch,
-            extra_fountain=args.extra,
-            key=key,
-            key_id=args.key_id,
-            counter=args.counter,
-            refine=args.refine,
-            contact_plan=contact,
-        )
+        blob = pack_cmd_batch(batch, extra_fountain=args.extra, key=key)
         write_bin(args.output, blob)
         print(
-            f"Wrote {len(blob)} bytes to {args.output} ({len(blob)//32} atoms). TYPE=CMD_BATCH"
+            f"Wrote {len(blob)} bytes to {args.output} "
+            f"({len(blob)//32} atoms). TYPE=CMD_BATCH"
         )
     except Exception as e:
         print(f"Error packing command batch: {e}")
@@ -207,7 +204,11 @@ def cmd_wrap_sp(args):
     try:
         astral_stream = read_bin(args.input)
         if args.msg_type not in APID_MAP:
-            print(f"Error: msg_type '{args.msg_type}' not in APID_MAP. Valid types: {list(APID_MAP.keys())}")
+            valid_types = list(APID_MAP.keys())
+            print(
+                f"Error: msg_type '{args.msg_type}' not in APID_MAP. "
+                f"Valid types: {valid_types}"
+            )
             return 1
         counter = SpacePacketSequenceCounter()
         apid = APID_MAP[args.msg_type][0]
@@ -218,7 +219,10 @@ def cmd_wrap_sp(args):
             counter,
         )
         write_bin(args.output, packet)
-        print(f"Wrapped {len(astral_stream)} bytes into Space Packet ({len(packet)} bytes total).")
+        print(
+            f"Wrapped {len(astral_stream)} bytes into Space Packet "
+            f"({len(packet)} bytes total)."
+        )
     except Exception as e:
         print(f"Error wrapping Space Packet: {e}")
         return 1
@@ -243,11 +247,16 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="astral")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    p_pack = sub.add_parser("pack", help="pack JSON message to atomized binary")
+    p_pack = sub.add_parser(
+        "pack", help="pack JSON message to atomized binary"
+    )
     p_pack.add_argument("input")
     p_pack.add_argument("output")
     p_pack.add_argument(
-        "--extra", type=int, default=0, help="extra fountain packets for redundancy"
+        "--extra",
+        type=int,
+        default=0,
+        help="extra fountain packets for redundancy",
     )
     p_pack.set_defaults(func=cmd_pack)
 
@@ -261,18 +270,34 @@ def main(argv=None):
     p_sim.add_argument("input")
     p_sim.add_argument("output")
     p_sim.add_argument(
-        "--drop", type=float, default=0.3, help="probability to drop each atom [0..1]"
+        "--drop",
+        type=float,
+        default=0.3,
+        help="probability to drop each atom [0..1]",
     )
     p_sim.set_defaults(func=cmd_simulate)
 
-    p_wrap_sp = sub.add_parser("wrap-sp", help="wrap ASTRAL binary in CCSDS Space Packet")
+    p_wrap_sp = sub.add_parser(
+        "wrap-sp", help="wrap ASTRAL binary in CCSDS Space Packet"
+    )
     p_wrap_sp.add_argument("input", help="ASTRAL binary stream")
     p_wrap_sp.add_argument("output", help="Space Packet output file")
-    p_wrap_sp.add_argument("--msg-type", default="DETECT", help="message type (default: DETECT)")
-    p_wrap_sp.add_argument("--seq-count", type=int, default=None, help="optional initial sequence counter (0-16383)")
+    p_wrap_sp.add_argument(
+        "--msg-type",
+        default="DETECT",
+        help="message type (default: DETECT)",
+    )
+    p_wrap_sp.add_argument(
+        "--seq-count",
+        type=int,
+        default=None,
+        help="optional initial sequence counter (0-16383)",
+    )
     p_wrap_sp.set_defaults(func=cmd_wrap_sp)
 
-    p_unwrap_sp = sub.add_parser("unwrap-sp", help="unwrap CCSDS Space Packet to ASTRAL")
+    p_unwrap_sp = sub.add_parser(
+        "unwrap-sp", help="unwrap CCSDS Space Packet to ASTRAL"
+    )
     p_unwrap_sp.add_argument("input", help="Space Packet input file")
     p_unwrap_sp.set_defaults(func=cmd_unwrap_sp)
 
@@ -280,9 +305,6 @@ def main(argv=None):
     p_pack_text.add_argument("text")
     p_pack_text.add_argument("output")
     p_pack_text.add_argument("--extra", type=int, default=0)
-    p_pack_text.add_argument(
-        "--refine", type=int, default=0, help="extra REFINE packets"
-    )
     p_pack_text.set_defaults(func=cmd_pack_text)
 
     p_pack_text_dict = sub.add_parser(
@@ -292,10 +314,11 @@ def main(argv=None):
     p_pack_text_dict.add_argument("text")
     p_pack_text_dict.add_argument("output")
     p_pack_text_dict.add_argument("--extra", type=int, default=0)
-    p_pack_text_dict.add_argument("--refine", type=int, default=0)
     p_pack_text_dict.set_defaults(func=cmd_pack_text_dict)
 
-    p_pack_voice = sub.add_parser("pack-voice", help="pack a VOICE message from WAV")
+    p_pack_voice = sub.add_parser(
+        "pack-voice", help="pack a VOICE message from WAV"
+    )
     p_pack_voice.add_argument("input")
     p_pack_voice.add_argument("output")
     p_pack_voice.add_argument("--extra", type=int, default=0)
@@ -308,12 +331,15 @@ def main(argv=None):
     p_unpack_voice.add_argument("output")
     p_unpack_voice.set_defaults(func=cmd_unpack_voice)
 
-    p_pack_cmd = sub.add_parser("pack-cmd", help="pack a CMD message from JSON string")
+    p_pack_cmd = sub.add_parser(
+        "pack-cmd", help="pack a CMD message from JSON string"
+    )
     p_pack_cmd.add_argument("json")
     p_pack_cmd.add_argument("output")
     p_pack_cmd.add_argument("--extra", type=int, default=0)
-    p_pack_cmd.add_argument("--refine", type=int, default=0)
-    p_pack_cmd.add_argument("--key", help="hex key for HMAC auth", default=None)
+    p_pack_cmd.add_argument(
+        "--key", help="hex key for HMAC auth", default=None
+    )
     p_pack_cmd.set_defaults(func=cmd_pack_cmd)
 
     p_pack_cmd_batch = sub.add_parser(
@@ -322,18 +348,8 @@ def main(argv=None):
     p_pack_cmd_batch.add_argument("json")
     p_pack_cmd_batch.add_argument("output")
     p_pack_cmd_batch.add_argument("--extra", type=int, default=0)
-    p_pack_cmd_batch.add_argument("--refine", type=int, default=0)
     p_pack_cmd_batch.add_argument(
         "--key", help="hex key for HMAC over batch", default=None
-    )
-    p_pack_cmd_batch.add_argument(
-        "--key-id", type=int, default=0, help="key slot id (0-255)"
-    )
-    p_pack_cmd_batch.add_argument(
-        "--counter", type=int, default=0, help="anti-replay counter"
-    )
-    p_pack_cmd_batch.add_argument(
-        "--contact", help="contact windows 'start-end,start-end' seconds", default=None
     )
     p_pack_cmd_batch.set_defaults(func=cmd_pack_cmd_batch)
 
