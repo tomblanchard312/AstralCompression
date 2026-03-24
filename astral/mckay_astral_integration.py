@@ -6,19 +6,22 @@ import lzma
 import math
 import re
 import struct
+import warnings
 import zlib
-from typing import Dict, List, Tuple
+from typing import Dict
 
-MCKAY_VERSION = 2
+MCKAY_VERSION: int = 2
 
 TRANSFORM_PASSTHROUGH = 0x00
 TRANSFORM_TEXT = 0x01
 TRANSFORM_TELEMETRY = 0x02
-TRANSFORM_VOICE = 0x03
+TRANSFORM_VOICE_C2 = 0x03
 TRANSFORM_BINARY_FLOAT = 0x04
-TRANSFORM_IMAGE_DCT = 0x05
 
-MISSION_ABBREVS = {
+HEADER_SIZE = 8
+MAGIC = b"MK"
+
+MISSION_ABBREVS: dict[str, str] = {
     "nominal": "NOM",
     "satellite": "SAT",
     "battery": "BAT",
@@ -31,7 +34,6 @@ MISSION_ABBREVS = {
     "contact": "CNT",
     "entering": "ENT",
     "established": "EST",
-    "investigation": "INV",
     "anomaly": "ANM",
     "downlink": "DLK",
     "uplink": "ULK",
@@ -41,35 +43,73 @@ MISSION_ABBREVS = {
     "warning": "WRN",
     "critical": "CRT",
     "interface": "IFC",
-    "subsystem": "SSM",
     "transmit": "TX",
     "receive": "RX",
+    "subsystem": "SSM",
 }
 
 _ABBREV_WORDS = sorted(MISSION_ABBREVS.keys())
 _ABBREV_TO_ID = {word: idx for idx, word in enumerate(_ABBREV_WORDS)}
 _ID_TO_ABBREV = {idx: word for word, idx in _ABBREV_TO_ID.items()}
 
-
-def _pack_header(transform_id: int, original_len: int) -> bytes:
-    if original_len > 0xFFFF:
-        raise ValueError("McKay v2 header supports payloads up to 65535 bytes")
-    return b"MK" + bytes([MCKAY_VERSION, transform_id]) + struct.pack("<H", original_len)
-
-
-def _is_text_like(data: bytes) -> bool:
-    if not data:
-        return True
-    sample = data[: min(2048, len(data))]
-    printable = sum(1 for b in sample if b in (9, 10, 13) or 32 <= b <= 126)
-    return (printable / len(sample)) > 0.85
+try:
+    import astral_compress as _ac
+    _RUST_AVAILABLE = True
+except ImportError:
+    _RUST_AVAILABLE = False
 
 
-def _looks_float32_be(data: bytes) -> bool:
-    if len(data) < 16 or len(data) % 4 != 0:
-        return False
-    vals = struct.unpack(f">{len(data) // 4}f", data)
-    return all(math.isfinite(v) for v in vals)
+def _pack_u16(v: int) -> bytes:
+    return bytes([v & 0xFF, (v >> 8) & 0xFF])
+
+
+def _unpack_u16(b: bytes) -> int:
+    return b[0] | (b[1] << 8)
+
+
+def _detect_type(data: bytes) -> str:
+    """Heuristic data type detection."""
+    if len(data) < 4:
+        return "BINARY"
+    if data[:2] == b"VX":
+        return "VOICE"
+
+    sample = data[: min(256, len(data))]
+    printable = sum(1 for b in sample if 0x20 <= b <= 0x7E or b in (0x09, 0x0A, 0x0D))
+    if printable / len(sample) > 0.85:
+        return "TEXT"
+
+    if len(data) % 4 == 0 and len(data) >= 16:
+        try:
+            floats = struct.unpack(f">{len(data) // 4}f", data)
+            if all(math.isfinite(f) for f in floats[:64]):
+                return "BINARY"
+        except Exception:
+            pass
+
+    return "BINARY"
+
+
+def _compress_text(data: bytes) -> tuple[int, bytes]:
+    """Returns (transform_id, payload_bytes)."""
+    if _RUST_AVAILABLE:
+        try:
+            return TRANSFORM_TEXT, _ac.compress_text(data)
+        except Exception:
+            pass  # Fall back to Python implementation
+    
+    abbr_bytes = _text_abbrev_encode(data)
+
+    candidates = [
+        zlib.compress(abbr_bytes, 9),
+        lzma.compress(abbr_bytes, preset=9),
+        zlib.compress(data, 9),
+        lzma.compress(data, preset=9),
+    ]
+    best = min(candidates, key=len)
+    if len(best) >= len(data):
+        return TRANSFORM_PASSTHROUGH, lzma.compress(data, preset=9)
+    return TRANSFORM_TEXT, best
 
 
 def _apply_case(word: str, case_flag: int) -> str:
@@ -83,7 +123,7 @@ def _apply_case(word: str, case_flag: int) -> str:
 def _text_abbrev_encode(data: bytes) -> bytes:
     text = data.decode("utf-8")
     tokens = re.split(r"(\W+)", text)
-    out_parts: List[str] = []
+    out_parts = []
     marker = "\x1e"
     for token in tokens:
         if token.isalpha():
@@ -105,6 +145,12 @@ def _text_abbrev_encode(data: bytes) -> bytes:
 
 
 def _text_abbrev_decode(data: bytes) -> bytes:
+    if _RUST_AVAILABLE:
+        try:
+            return _ac.decompress_text(data)
+        except Exception:
+            pass  # Fall back to Python implementation
+    
     text = data.decode("utf-8")
 
     def repl(match: re.Match[str]) -> str:
@@ -119,324 +165,396 @@ def _text_abbrev_decode(data: bytes) -> bytes:
     return restored.encode("utf-8")
 
 
-def _byte_reorder_float32(data: bytes) -> bytes:
-    n = len(data) // 4
-    b0 = bytearray(n)
-    b1 = bytearray(n)
-    b2 = bytearray(n)
-    b3 = bytearray(n)
-    for i in range(n):
-        off = i * 4
-        b0[i] = data[off]
-        b1[i] = data[off + 1]
-        b2[i] = data[off + 2]
-        b3[i] = data[off + 3]
-    return bytes(b0 + b1 + b2 + b3)
+def _auto_detect_channels(data: bytes) -> int:
+    """
+    Try divisors of n_floats from 1..32; pick the one with
+    lowest average absolute consecutive difference.
+    Falls back to 1.
+    """
+    n_floats = len(data) // 4
+    if n_floats < 4:
+        return 1
+    floats = struct.unpack(f">{n_floats}f", data[: n_floats * 4])
+    best_ch, best_score = 1, float("inf")
+    for ch in range(1, min(33, n_floats + 1)):
+        if n_floats % ch != 0:
+            continue
+        n_t = n_floats // ch
+        score = 0.0
+        for c in range(ch):
+            vals = [floats[t * ch + c] for t in range(n_t)]
+            rng = max(vals) - min(vals)
+            if rng < 1e-30:
+                continue
+            diffs = [abs(vals[i] - vals[i - 1]) / rng for i in range(1, n_t)]
+            score += sum(diffs) / max(len(diffs), 1)
+        score /= ch
+        if score < best_score:
+            best_score = score
+            best_ch = ch
+    return best_ch
 
 
-def _byte_unreorder_float32(data: bytes) -> bytes:
-    n = len(data) // 4
-    q = n
-    a, b, c, d = data[:q], data[q : 2 * q], data[2 * q : 3 * q], data[3 * q : 4 * q]
-    out = bytearray(len(data))
-    for i in range(n):
-        off = i * 4
-        out[off] = a[i]
-        out[off + 1] = b[i]
-        out[off + 2] = c[i]
-        out[off + 3] = d[i]
+def _compress_telemetry(data: bytes, channels: int) -> tuple[int, bytes]:
+    """Returns (TRANSFORM_TELEMETRY, payload_bytes)."""
+    if _RUST_AVAILABLE:
+        try:
+            return TRANSFORM_TELEMETRY, _ac.compress_telemetry(data, channels)
+        except Exception:
+            pass  # Fall back to Python implementation
+    
+    n_floats = len(data) // 4
+    n_samples = n_floats // channels
+    floats = struct.unpack(f">{n_floats}f", data[: n_floats * 4])
+
+    ch_vals = [
+        [floats[t * channels + ch] for t in range(n_samples)]
+        for ch in range(channels)
+    ]
+
+    meta = bytearray()
+    firsts = bytearray()
+    deltas = bytearray()
+
+    for vals in ch_vals:
+        mn = min(vals)
+        span = max(vals) - mn
+        if span < 1e-30:
+            span = 1.0
+        meta.extend(struct.pack(">ff", mn, span))
+
+        q = [max(0, min(65535, round((v - mn) / span * 65535))) for v in vals]
+        firsts.extend(struct.pack(">H", q[0]))
+        d = [max(-32768, min(32767, q[i] - q[i - 1])) for i in range(1, len(q))]
+        if d:
+            deltas.extend(struct.pack(f">{len(d)}h", *d))
+
+    payload = bytes(meta) + bytes(firsts) + bytes(deltas)
+    return TRANSFORM_TELEMETRY, lzma.compress(payload, preset=9)
+
+
+def _decompress_telemetry(payload_bytes: bytes, original_length: int, channels: int) -> bytes:
+    """Inverse of _compress_telemetry."""
+    if _RUST_AVAILABLE:
+        try:
+            return _ac.decompress_telemetry(payload_bytes, original_length, channels)
+        except Exception:
+            pass  # Fall back to Python implementation
+    
+    payload = lzma.decompress(payload_bytes)
+    n_floats = original_length // 4
+    n_samples = n_floats // channels
+
+    meta_sz = channels * 8
+    first_sz = channels * 2
+    delta_sz = channels * max(0, n_samples - 1) * 2
+
+    meta_b = payload[:meta_sz]
+    first_b = payload[meta_sz : meta_sz + first_sz]
+    delta_b = payload[meta_sz + first_sz : meta_sz + first_sz + delta_sz]
+
+    result = []
+    for ch in range(channels):
+        mn, span = struct.unpack(">ff", meta_b[ch * 8 : (ch + 1) * 8])
+        q0 = struct.unpack(">H", first_b[ch * 2 : (ch + 1) * 2])[0]
+
+        q = [q0]
+        if n_samples > 1:
+            off = ch * (n_samples - 1) * 2
+            ds = struct.unpack(
+                f">{n_samples - 1}h",
+                delta_b[off : off + (n_samples - 1) * 2],
+            )
+            for d in ds:
+                q.append(max(0, min(65535, q[-1] + d)))
+
+        result.append([mn + v / 65535.0 * span for v in q])
+
+    out = bytearray()
+    for t in range(n_samples):
+        for ch in range(channels):
+            out.extend(struct.pack(">f", result[ch][t]))
     return bytes(out)
 
 
-def _choose_channels(values: List[float]) -> int:
-    n = len(values)
-    best = 1
-    best_score = float("-inf")
-    for ch in range(1, min(32, n) + 1):
-        if n % ch != 0:
-            continue
-        samples_per = n // ch
-        if samples_per < 8:
-            continue
-        score = 0.0
-        for c in range(ch):
-            series = values[c::ch]
-            diffs = [abs(series[i] - series[i - 1]) for i in range(1, len(series))]
-            score -= sum(diffs) / max(1, len(diffs))
-        if score > best_score:
-            best_score = score
-            best = ch
-    return best
+def _compress_voice(data: bytes, voice_bps: int) -> tuple[int, bytes]:
+    """
+    Re-encode a VX voice bitstream using Codec2.
+    Falls back to TRANSFORM_PASSTHROUGH if pycodec2 is unavailable.
+    """
+    try:
+        from importlib import import_module
+
+        Codec2 = import_module("pycodec2.pycodec2").Codec2
+        import numpy as np  # type: ignore
+    except ImportError:
+        warnings.warn(
+            "pycodec2 not available; install with: pip install pycodec2 "
+            "(also requires libcodec2-dev system library). "
+            "Falling back to LZMA passthrough for voice.",
+            ImportWarning,
+            stacklevel=4,
+        )
+        return TRANSFORM_PASSTHROUGH, lzma.compress(data, preset=9)
+
+    if len(data) < 11 or data[:2] != b"VX":
+        return TRANSFORM_PASSTHROUGH, lzma.compress(data, preset=9)
+
+    try:
+        from astral.voice import decode_bitstream_to_wav as _dec_wav
+        import os
+        import tempfile
+        import wave
+
+        tmp_path = None
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp_path = tmp.name
+        _dec_wav(data, tmp_path)
+        wf = wave.open(tmp_path, "rb")
+        raw_pcm = wf.readframes(wf.getnframes())
+        wf.close()
+        os.remove(tmp_path)
+        samples_orig = np.frombuffer(raw_pcm, dtype=np.int16).copy()
+    except Exception:
+        return TRANSFORM_PASSTHROUGH, lzma.compress(data, preset=9)
+
+    valid_bps = {700, 1200, 1300, 1400, 1600, 2400, 3200}
+    if voice_bps not in valid_bps:
+        voice_bps = 1200
+
+    c2 = Codec2(voice_bps)
+    spf = c2.samples_per_frame()
+    bpf = c2.bytes_per_frame()
+
+    n_pad = (math.ceil(len(samples_orig) / spf) * spf) - len(samples_orig)
+    samples_padded = np.concatenate([samples_orig, np.zeros(n_pad, dtype=np.int16)])
+
+    encoded = c2.encode(samples_padded)
+    n_frames_c2 = len(samples_padded) // spf
+
+    hdr = struct.pack(">HII", voice_bps, n_frames_c2, len(samples_orig))
+    padded_enc = encoded + bytes(n_frames_c2 * bpf - len(encoded))
+    return TRANSFORM_VOICE_C2, hdr + padded_enc
 
 
-def _telemetry_encode(data: bytes) -> bytes:
-    vals = list(struct.unpack(f">{len(data) // 4}f", data))
-    channels = _choose_channels(vals)
-    count = len(vals)
+def _decompress_voice(payload_bytes: bytes) -> bytes:
+    """
+    Decode a Codec2 voice payload back to raw PCM int16 bytes.
+    Returns raw 8kHz 16-bit mono PCM.
+    """
+    try:
+        from importlib import import_module
 
-    transposed: List[List[float]] = []
-    for c in range(channels):
-        transposed.append(vals[c::channels])
+        Codec2 = import_module("pycodec2.pycodec2").Codec2
+        import numpy as np  # type: ignore
+    except ImportError as exc:
+        raise ValueError(
+            "pycodec2 required to decompress VOICE data. "
+            "Install with: pip install pycodec2"
+        ) from exc
 
-    meta = bytearray()
-    deltas = bytearray()
-    for ch in transposed:
-        mn = min(ch)
-        mx = max(ch)
-        scale = 4095.0 / (mx - mn) if mx > mn else 1.0
-        meta.extend(struct.pack(">ff", mn, scale))
-
-        q = [int(round((v - mn) * scale)) if mx > mn else 0 for v in ch]
-        q = [max(0, min(4095, x)) for x in q]
-        prev = q[0] if q else 0
-        deltas.extend(struct.pack(">h", prev))
-        for i in range(1, len(q)):
-            d = q[i] - prev
-            prev = q[i]
-            deltas.extend(struct.pack(">h", max(-32768, min(32767, d))))
-
-    payload = bytearray()
-    payload.append(channels)
-    payload.extend(struct.pack(">I", count))
-    payload.extend(meta)
-    payload.extend(deltas)
-    return lzma.compress(bytes(payload), preset=9)
+    voice_bps, _n_frames, n_orig = struct.unpack_from(">HII", payload_bytes)
+    c2_bytes = payload_bytes[10:]
+    c2 = Codec2(voice_bps)
+    dec = c2.decode(c2_bytes)
+    raw_pcm = dec[:n_orig].astype(np.int16)
+    return raw_pcm.tobytes()
 
 
-def _telemetry_decode(payload: bytes, original_len: int) -> bytes:
-    raw = lzma.decompress(payload)
-    pos = 0
-    channels = raw[pos]
-    pos += 1
-    count = struct.unpack(">I", raw[pos : pos + 4])[0]
-    pos += 4
-    samples_per = count // channels if channels else 0
+def _compress_binary(data: bytes) -> tuple[int, bytes]:
+    """
+    For float32 arrays: reorder bytes to group exponents/mantissas.
+    Otherwise plain LZMA.
+    """
+    if _RUST_AVAILABLE and len(data) >= 16 and len(data) % 4 == 0:
+        try:
+            return TRANSFORM_BINARY_FLOAT, _ac.compress_binary_float(data)
+        except Exception:
+            pass  # Fall back to Python implementation
+    
+    if len(data) >= 16 and len(data) % 4 == 0:
+        n = len(data) // 4
+        b0 = bytes(data[i * 4 + 0] for i in range(n))
+        b1 = bytes(data[i * 4 + 1] for i in range(n))
+        b2 = bytes(data[i * 4 + 2] for i in range(n))
+        b3 = bytes(data[i * 4 + 3] for i in range(n))
+        reordered = b0 + b1 + b2 + b3
+        reordered_lzma = lzma.compress(reordered, preset=9)
+        plain_lzma = lzma.compress(data, preset=9)
+        if len(reordered_lzma) < len(plain_lzma):
+            return TRANSFORM_BINARY_FLOAT, reordered_lzma
+        return TRANSFORM_PASSTHROUGH, plain_lzma
 
-    mins: List[float] = []
-    scales: List[float] = []
-    for _ in range(channels):
-        mn, sc = struct.unpack(">ff", raw[pos : pos + 8])
-        pos += 8
-        mins.append(mn)
-        scales.append(sc if sc != 0 else 1.0)
-
-    channel_values: List[List[float]] = []
-    for c in range(channels):
-        qvals: List[int] = []
-        prev = 0
-        for i in range(samples_per):
-            d = struct.unpack(">h", raw[pos : pos + 2])[0]
-            pos += 2
-            if i == 0:
-                prev = d
-            else:
-                prev = prev + d
-            qvals.append(prev)
-
-        mn = mins[c]
-        sc = scales[c]
-        if sc == 0:
-            sc = 1.0
-        channel_values.append([mn + (q / sc) for q in qvals])
-
-    out_vals: List[float] = [0.0] * count
-    for c in range(channels):
-        for t, v in enumerate(channel_values[c]):
-            out_vals[t * channels + c] = v
-
-    out = struct.pack(f">{len(out_vals)}f", *out_vals)
-    return out[:original_len]
+    return TRANSFORM_PASSTHROUGH, lzma.compress(data, preset=9)
 
 
-def _dct1d(x: List[float]) -> List[float]:
-    n = 8
-    out: List[float] = []
-    for k in range(n):
-        s = 0.0
-        for idx in range(n):
-            s += x[idx] * math.cos(math.pi * k * (2 * idx + 1) / (2 * n))
-        scale = math.sqrt(1 / n) if k == 0 else math.sqrt(2 / n)
-        out.append(scale * s)
-    return out
+def _decompress_binary_float(payload_bytes: bytes, original_length: int) -> bytes:
+    """Inverse of float byte-reorder."""
+    if _RUST_AVAILABLE:
+        try:
+            return _ac.decompress_binary_float(payload_bytes, original_length)
+        except Exception:
+            pass  # Fall back to Python implementation
+    
+    reordered = lzma.decompress(payload_bytes)
+    n = original_length // 4
+    out = bytearray(original_length)
+    for i in range(n):
+        out[i * 4 + 0] = reordered[0 * n + i]
+        out[i * 4 + 1] = reordered[1 * n + i]
+        out[i * 4 + 2] = reordered[2 * n + i]
+        out[i * 4 + 3] = reordered[3 * n + i]
+    return bytes(out)
 
 
-def dct2_8x8(block: List[List[float]]) -> List[List[float]]:
-    rows = [_dct1d(block[i]) for i in range(8)]
-    cols = [[rows[r][c] for r in range(8)] for c in range(8)]
-    return [_dct1d(col) for col in cols]
+def compress(
+    data: bytes,
+    data_type: str = "AUTO",
+    voice_bps: int = 1200,
+    channels: int = 0,
+) -> bytes:
+    """Compress data using the McKay v2 domain-aware pipeline."""
+    if not isinstance(data, bytes):
+        raise TypeError("data must be bytes")
 
+    if len(data) == 0:
+        payload = lzma.compress(b"", preset=9)
+        return (
+            MAGIC
+            + bytes([MCKAY_VERSION, TRANSFORM_PASSTHROUGH])
+            + _pack_u16(0)
+            + bytes([0, 0])
+            + payload
+        )
 
-def _zigzag_indices() -> List[Tuple[int, int]]:
-    order: List[Tuple[int, int]] = []
-    for s in range(15):
-        if s % 2 == 0:
-            r = min(s, 7)
-            c = s - r
-            while r >= 0 and c <= 7:
-                order.append((r, c))
-                r -= 1
-                c += 1
-        else:
-            c = min(s, 7)
-            r = s - c
-            while c >= 0 and r <= 7:
-                order.append((r, c))
-                r += 1
-                c -= 1
-    return order
+    if data_type == "AUTO":
+        data_type = _detect_type(data)
 
+    if data_type == "TEXT":
+        tid, payload = _compress_text(data)
+    elif data_type == "TELEMETRY":
+        ch = channels if channels > 0 else _auto_detect_channels(data)
+        tid, payload = _compress_telemetry(data, ch)
+        channels = ch
+    elif data_type == "VOICE":
+        tid, payload = _compress_voice(data, voice_bps)
+    elif data_type == "BINARY":
+        tid, payload = _compress_binary(data)
+    else:
+        tid, payload = TRANSFORM_PASSTHROUGH, lzma.compress(data, preset=9)
 
-_ZZ = _zigzag_indices()
-_Q = [
-    [16, 11, 10, 16, 24, 40, 51, 61],
-    [12, 12, 14, 19, 26, 58, 60, 55],
-    [14, 13, 16, 24, 40, 57, 69, 56],
-    [14, 17, 22, 29, 51, 87, 80, 62],
-    [18, 22, 37, 56, 68, 109, 103, 77],
-    [24, 35, 55, 64, 81, 104, 113, 92],
-    [49, 64, 78, 87, 103, 121, 120, 101],
-    [72, 92, 95, 98, 112, 100, 103, 99],
-]
-
-
-def _image_encode(data: bytes) -> bytes:
-    if len(data) < 4:
-        return zlib.compress(data, 9)
-    w, h = struct.unpack(">HH", data[:4])
-    px = data[4:]
-    if w == 0 or h == 0 or len(px) < w * h:
-        return zlib.compress(data, 9)
-
-    out = bytearray(struct.pack(">HH", w, h))
-    for by in range(0, h, 8):
-        for bx in range(0, w, 8):
-            block = [[0.0] * 8 for _ in range(8)]
-            for y in range(8):
-                for x in range(8):
-                    iy = min(h - 1, by + y)
-                    ix = min(w - 1, bx + x)
-                    block[y][x] = float(px[iy * w + ix]) - 128.0
-            coeff = dct2_8x8(block)
-            qblock = [[int(round(coeff[y][x] / _Q[y][x])) for x in range(8)] for y in range(8)]
-            for y, x in _ZZ:
-                out.extend(struct.pack(">h", qblock[y][x]))
-    return zlib.compress(bytes(out), 9)
-
-
-class McKayCompressor:
-    def __init__(self) -> None:
-        self._last_stats: Dict[str, float] = {}
-
-    def compress(self, data: bytes, data_type: str = "AUTO") -> bytes:
-        if not isinstance(data, bytes):
-            raise TypeError("data must be bytes")
-        if len(data) > 0xFFFF:
-            raise ValueError("McKay v2 supports payloads up to 65535 bytes")
-
-        if data_type == "AUTO":
-            if _is_text_like(data):
-                data_type = "TEXT"
-            elif _looks_float32_be(data):
-                data_type = "BINARY"
-            else:
-                data_type = "BINARY"
-
-        transform_id = TRANSFORM_PASSTHROUGH
+    if len(payload) >= len(data):
+        tid = TRANSFORM_PASSTHROUGH
+        payload = lzma.compress(data, preset=9)
+    if len(payload) >= len(data):
+        tid = TRANSFORM_PASSTHROUGH
         payload = data
 
-        if data_type == "TEXT":
-            raw_z = zlib.compress(data, 9)
-            try:
-                mapped = _text_abbrev_encode(data)
-                mapped_z = zlib.compress(mapped, 9)
-                if len(mapped_z) <= len(raw_z):
-                    payload = b"\x01" + mapped_z
-                else:
-                    payload = b"\x00" + raw_z
-            except UnicodeDecodeError:
-                payload = b"\x00" + raw_z
-            transform_id = TRANSFORM_TEXT
-        elif data_type == "TELEMETRY" and _looks_float32_be(data):
-            payload = _telemetry_encode(data)
-            transform_id = TRANSFORM_TELEMETRY
-        elif data_type == "VOICE":
-            payload = zlib.compress(data, 9)
-            transform_id = TRANSFORM_VOICE
-        elif data_type == "IMAGE":
-            payload = _image_encode(data)
-            transform_id = TRANSFORM_IMAGE_DCT
-        elif data_type == "BINARY" and _looks_float32_be(data):
-            reordered = _byte_reorder_float32(data)
-            payload = lzma.compress(reordered, preset=9)
-            transform_id = TRANSFORM_BINARY_FLOAT
-        else:
-            payload = lzma.compress(data, preset=9)
-            transform_id = TRANSFORM_PASSTHROUGH
-
-        if len(payload) > len(data):
-            transform_id = TRANSFORM_PASSTHROUGH
-            payload = data
-
-        out = _pack_header(transform_id, len(data)) + payload
-        self._last_stats = {
-            "original_size": float(len(data)),
-            "compressed_size": float(len(out)),
-            "ratio": (len(data) / len(out)) if len(out) else 1.0,
-        }
-        return out
-
-    def decompress(self, data: bytes) -> bytes:
-        if not isinstance(data, bytes) or len(data) < 6:
-            raise ValueError("invalid McKay payload")
-        if data[:2] != b"MK" or data[2] != MCKAY_VERSION:
-            raise ValueError("invalid McKay header")
-        transform_id = data[3]
-        original_len = struct.unpack("<H", data[4:6])[0]
-        payload = data[6:]
-
-        if transform_id == TRANSFORM_PASSTHROUGH:
-            return payload[:original_len]
-        if transform_id == TRANSFORM_TEXT:
-            if not payload:
-                return b""
-            mode = payload[0]
-            body = payload[1:]
-            text_bytes = zlib.decompress(body)
-            if mode == 1:
-                return _text_abbrev_decode(text_bytes)
-            return text_bytes
-        if transform_id == TRANSFORM_TELEMETRY:
-            return _telemetry_decode(payload, original_len)
-        if transform_id == TRANSFORM_VOICE:
-            return zlib.decompress(payload)[:original_len]
-        if transform_id == TRANSFORM_BINARY_FLOAT:
-            reordered = lzma.decompress(payload)
-            return _byte_unreorder_float32(reordered)[:original_len]
-        if transform_id == TRANSFORM_IMAGE_DCT:
-            return zlib.decompress(payload)[:original_len]
-
-        raise ValueError("unknown McKay transform id")
-
-    def stats(self) -> Dict[str, float]:
-        return dict(self._last_stats)
-
-
-def compress(data: bytes, data_type: str = "AUTO") -> bytes:
-    return McKayCompressor().compress(data, data_type)
+    orig_len = min(len(data), 0xFFFF)
+    header = (
+        MAGIC
+        + bytes([MCKAY_VERSION, tid])
+        + _pack_u16(orig_len)
+        + bytes([min(channels, 255), 0])
+    )
+    return header + payload
 
 
 def decompress(data: bytes) -> bytes:
-    return McKayCompressor().decompress(data)
+    """Decompress a McKay v2 compressed stream."""
+    if not isinstance(data, bytes):
+        raise TypeError("data must be bytes")
+    if len(data) < HEADER_SIZE:
+        raise ValueError(f"Too short for McKay v2 header: {len(data)} bytes")
+    if data[:2] != MAGIC:
+        raise ValueError(f"Bad magic: {data[:2]!r} (expected b'MK')")
+
+    _version = data[2]
+    tid = data[3]
+    orig_len = _unpack_u16(data[4:6])
+    channels = data[6]
+    payload = data[HEADER_SIZE:]
+
+    if tid == TRANSFORM_PASSTHROUGH:
+        try:
+            return lzma.decompress(payload)
+        except Exception:
+            return payload
+
+    if tid == TRANSFORM_TEXT:
+        for decomp in (lzma.decompress, zlib.decompress):
+            try:
+                plain = decomp(payload)
+                try:
+                    return _text_abbrev_decode(plain)
+                except Exception:
+                    return plain
+            except Exception:
+                continue
+        raise ValueError("TEXT payload decompression failed")
+
+    if tid == TRANSFORM_TELEMETRY:
+        if channels == 0:
+            channels = 1
+        return _decompress_telemetry(payload, orig_len, channels)
+
+    if tid == TRANSFORM_VOICE_C2:
+        return _decompress_voice(payload)
+
+    if tid == TRANSFORM_BINARY_FLOAT:
+        return _decompress_binary_float(payload, orig_len)
+
+    raise ValueError(f"Unknown McKay v2 transform ID: 0x{tid:02X}")
+
+
+def stats(compressed: bytes) -> dict:
+    """Return compression statistics for a McKay v2 stream."""
+    if len(compressed) < HEADER_SIZE:
+        return {"error": "too short"}
+    tid = compressed[3]
+    orig_len = _unpack_u16(compressed[4:6])
+    payload = compressed[HEADER_SIZE:]
+    names = {
+        TRANSFORM_PASSTHROUGH: "passthrough",
+        TRANSFORM_TEXT: "text",
+        TRANSFORM_TELEMETRY: "telemetry",
+        TRANSFORM_VOICE_C2: "voice_codec2",
+        TRANSFORM_BINARY_FLOAT: "binary_float",
+    }
+    comp_size = len(payload)
+    ratio = orig_len / comp_size if comp_size > 0 else 0.0
+    return {
+        "transform": names.get(tid, f"unknown_0x{tid:02X}"),
+        "original_size": orig_len,
+        "compressed_size": comp_size,
+        "ratio": round(ratio, 3),
+        "savings_pct": round((1 - 1 / ratio) * 100, 1) if ratio > 0 else 0.0,
+    }
+
+
+class McKayCompressor:
+    def __init__(self, voice_bps: int = 1200) -> None:
+        self.voice_bps = voice_bps
+
+    def compress(self, data: bytes, data_type: str = "AUTO") -> bytes:
+        return compress(data, data_type=data_type, voice_bps=self.voice_bps)
+
+    def decompress(self, data: bytes) -> bytes:
+        return decompress(data)
+
+    def stats(self, compressed: bytes) -> dict:
+        return stats(compressed)
 
 
 McKayASTRALCompressor = McKayCompressor
 
 
 class McKayASTRALIntegration:
-    def __init__(self) -> None:
-        self.mckay_compressor = McKayCompressor()
+    def __init__(self, voice_bps: int = 1200) -> None:
+        self.mckay_compressor = McKayCompressor(voice_bps=voice_bps)
 
     def compress_and_encode(self, data, data_type: str = "AUTO", extra_fountain: int = 0):
+        _ = extra_fountain
         payload = data if isinstance(data, bytes) else str(data).encode("utf-8")
         return self.mckay_compressor.compress(payload, data_type)
 

@@ -15,8 +15,10 @@ requires-python = ">=3.9"
 dependencies = []
 
 [project.optional-dependencies]
-rs = ["reedsolo>=1.7"]
-all = ["reedsolo>=1.7"]
+rs    = ["reedsolo>=1.7"]
+voice = ["pycodec2>=4.0", "numpy>=1.24"]
+fast = ["astral-compress>=0.1.0"]
+all   = ["reedsolo>=1.7", "pycodec2>=4.0", "numpy>=1.24", "astral-compress>=0.1.0"]
 
 [project.urls]
 Homepage = "https://github.com/tomblanchard312/AstralCompression"

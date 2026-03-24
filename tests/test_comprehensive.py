@@ -1,7 +1,4 @@
-import json
 import random
-import tempfile
-import os
 from astral.codec import (
     pack_message,
     unpack_stream,
@@ -10,7 +7,6 @@ from astral.codec import (
 )
 from astral.container import make_atom, parse_atoms
 from astral.fountain import lt_encode_blocks, lt_decode_blocks
-from astral.grammar import make_gist_bits, encode_payload, decode_payload
 from astral.bitstream import BitWriter, BitReader
 
 
@@ -35,7 +31,7 @@ def test_basic_functionality():
 
     # Test unpack
     result = unpack_stream(blob)
-    assert result["complete"] == True, "Should decode completely"
+    assert result["complete"] is True, "Should decode completely"
     assert abs(result["message"]["lat"] - msg["lat"]) < 1e-6, "Latitude should match"
 
     print("✓ Basic functionality works")
@@ -117,7 +113,6 @@ def test_loss_tolerance():
 
     # Test with high redundancy
     blob = pack_message(msg, extra_fountain=20)
-    total_atoms = len(blob) // 32
 
     # Test various drop rates
     for drop_rate in [0.1, 0.3, 0.5, 0.7]:
@@ -133,11 +128,11 @@ def test_loss_tolerance():
             first = False
         out = unpack_stream(bytes(lossy))
         assert "gist" in out, f"Should have gist even with {drop_rate:.1f} drop rate"
-        assert out["gist"]["type"] == "DETECT", "Gist type should be preserved"
+        assert out["gist"]["type"] == "DETECT", "Gist type should be preserved"  # type: ignore
 
         if drop_rate < 0.6:  # With high redundancy, should recover completely
             assert (
-                out["complete"] == True
+                out["complete"] is True
             ), f"Should recover completely with {drop_rate:.1f} drop rate"
 
     print("✓ Loss tolerance works as expected")
@@ -151,12 +146,12 @@ def test_text_messages():
     blob = pack_text_message(text, extra_fountain=5)
 
     result = unpack_stream(blob)
-    assert result["complete"] == True, "Text should decode completely"
-    assert result["message"]["type"] == "TEXT", "Should be TEXT type"
+    assert result["complete"] is True, "Text should decode completely"
+    assert result["message"]["type"] == "TEXT", "Should be TEXT type"  # type: ignore
     expected = "hello from ASTRAL: nominal link, standing by."
-    assert result["message"]["text"] == expected, (
+    assert result["message"]["text"] == expected, (  # type: ignore
         f"Text mismatch.\nExpected: {expected!r}\n"
-        f"Got:      {result['message']['text']!r}"
+        f"Got:      {result['message']['text']!r}"  # type: ignore
     )
     print("✓ Text messages work correctly")
 
@@ -169,9 +164,9 @@ def test_command_messages():
     blob = pack_cmd_message(cmd, extra_fountain=5)
 
     result = unpack_stream(blob)
-    assert result["complete"] == True, "Command should decode completely"
-    assert result["message"]["type"] == "CMD", "Should be CMD type"
-    assert result["message"]["cmd"]["name"] == "POINT", "Command name should match"
+    assert result["complete"] is True, "Command should decode completely"
+    assert result["message"]["type"] == "CMD", "Should be CMD type"  # type: ignore
+    assert result["message"]["cmd"]["name"] == "POINT", "Command name should match"  # type: ignore
 
     print("✓ Command messages work correctly")
 
@@ -222,7 +217,7 @@ def test_error_handling():
 
     # Test invalid input types
     try:
-        pack_message("not a dict")
+        pack_message("not a dict")  # type: ignore
         assert False, "Should reject non-dict input"
     except ValueError:
         pass  # Expected

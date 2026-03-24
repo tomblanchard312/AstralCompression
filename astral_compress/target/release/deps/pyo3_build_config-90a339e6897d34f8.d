@@ -1,0 +1,14 @@
+F:\source\repos\AstralCompression\astral_compress\target\release\deps\pyo3_build_config-90a339e6897d34f8.d: C:\Users\wtblanch\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pyo3-build-config-0.22.6\src\lib.rs C:\Users\wtblanch\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pyo3-build-config-0.22.6\src\errors.rs C:\Users\wtblanch\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pyo3-build-config-0.22.6\src\impl_.rs F:\source\repos\AstralCompression\astral_compress\target\release\build\pyo3-build-config-351686216e7d921d\out/pyo3-build-config-file.txt F:\source\repos\AstralCompression\astral_compress\target\release\build\pyo3-build-config-351686216e7d921d\out/pyo3-build-config.txt
+
+F:\source\repos\AstralCompression\astral_compress\target\release\deps\libpyo3_build_config-90a339e6897d34f8.rlib: C:\Users\wtblanch\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pyo3-build-config-0.22.6\src\lib.rs C:\Users\wtblanch\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pyo3-build-config-0.22.6\src\errors.rs C:\Users\wtblanch\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pyo3-build-config-0.22.6\src\impl_.rs F:\source\repos\AstralCompression\astral_compress\target\release\build\pyo3-build-config-351686216e7d921d\out/pyo3-build-config-file.txt F:\source\repos\AstralCompression\astral_compress\target\release\build\pyo3-build-config-351686216e7d921d\out/pyo3-build-config.txt
+
+F:\source\repos\AstralCompression\astral_compress\target\release\deps\libpyo3_build_config-90a339e6897d34f8.rmeta: C:\Users\wtblanch\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pyo3-build-config-0.22.6\src\lib.rs C:\Users\wtblanch\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pyo3-build-config-0.22.6\src\errors.rs C:\Users\wtblanch\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pyo3-build-config-0.22.6\src\impl_.rs F:\source\repos\AstralCompression\astral_compress\target\release\build\pyo3-build-config-351686216e7d921d\out/pyo3-build-config-file.txt F:\source\repos\AstralCompression\astral_compress\target\release\build\pyo3-build-config-351686216e7d921d\out/pyo3-build-config.txt
+
+C:\Users\wtblanch\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pyo3-build-config-0.22.6\src\lib.rs:
+C:\Users\wtblanch\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pyo3-build-config-0.22.6\src\errors.rs:
+C:\Users\wtblanch\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pyo3-build-config-0.22.6\src\impl_.rs:
+F:\source\repos\AstralCompression\astral_compress\target\release\build\pyo3-build-config-351686216e7d921d\out/pyo3-build-config-file.txt:
+F:\source\repos\AstralCompression\astral_compress\target\release\build\pyo3-build-config-351686216e7d921d\out/pyo3-build-config.txt:
+
+# env-dep:CARGO_PKG_VERSION=0.22.6
+# env-dep:OUT_DIR=F:\\source\\repos\\AstralCompression\\astral_compress\\target\\release\\build\\pyo3-build-config-351686216e7d921d\\out
