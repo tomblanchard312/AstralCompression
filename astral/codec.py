@@ -5,6 +5,7 @@ from .container import HEADER_GIST, FOUNTAIN_PACKET
 from .grammar import make_gist_bits, encode_payload, decode_payload
 from .spacepacket import SpacePacketSequenceCounter, wrap as _sp_wrap
 from .rs_fec import encode_stream as _rs_encode, decode_stream as _rs_decode
+from .tmframe import encode_frames as _tm_encode, decode_frames as _tm_decode
 from .grammar import parse_gist
 from .textpack import encode_text, decode_text
 from .commands import (
@@ -486,5 +487,108 @@ def unpack_stream_rs(rs_stream: bytes, e: int = 16) -> dict:
         "rs_e": e,
         "rs_corrected_symbols": n_corrected,
         "rs_uncorrectable_atoms": n_uncorrectable,
+        **astral_result,
+    }
+
+
+def pack_message_tm(
+    msg: dict,
+    scid: int,
+    vcid: int = 0,
+    message_id: int | None = None,
+    extra_fountain: int = 0,
+    randomise: bool = True,
+    counter=None,
+) -> bytes:
+    """
+    Pack a message and segment it into CCSDS TM Transfer Frames.
+
+    Parameters
+    ----------
+    msg : dict
+        Message dict with at least a ``type`` key.
+    scid : int
+        Spacecraft ID (10-bit, 0-1023).
+    vcid : int
+        Virtual Channel ID (3-bit, 0-7). Default 0.
+    message_id : int, optional
+        ASTRAL message ID. Generated randomly if omitted.
+    extra_fountain : int
+        Extra fountain redundancy packets.
+    randomise : bool
+        Apply CCSDS pseudo-randomizer to frame data fields. Default True.
+    counter : TmFrameCounter, optional
+        Frame sequence counter. A fresh one is created if omitted.
+
+    Returns
+    -------
+    bytes
+        Concatenated wire-format TM Transfer Frames (each 1119 bytes),
+        ready to hand to the modulator.
+    """
+    astral_stream = pack_message(
+        msg, message_id=message_id, extra_fountain=extra_fountain
+    )
+    return _tm_encode(
+        astral_stream,
+        scid=scid,
+        vcid=vcid,
+        counter=counter,
+        randomise=randomise,
+    )
+
+
+def unpack_frames_tm(
+    wire: bytes,
+    original_length: int | None = None,
+    randomise: bool = True,
+) -> dict:
+    """
+    Decode TM Transfer Frames and recover the enclosed ASTRAL stream.
+
+    Frames with CRC errors are dropped; the fountain code recovers from
+    the resulting atom erasures.
+
+    Parameters
+    ----------
+    wire : bytes
+        Raw wire bytes as received from the demodulator.
+    original_length : int, optional
+        If provided, trim the recovered data field to this many bytes before
+        passing to ``unpack_stream``. Useful when the caller knows the exact
+        ASTRAL stream length. If omitted, the full concatenated data fields
+        (including any fill bytes) are passed to ``unpack_stream``.
+    randomise : bool
+        Must match the value used during encoding. Default True.
+
+    Returns
+    -------
+    dict
+        All keys from ``unpack_stream()``, plus:
+
+        ``"tm_n_frames"`` : int
+            Number of frames successfully decoded.
+        ``"tm_n_crc_errors"`` : int
+            Number of frames dropped due to CRC failure.
+
+        Never raises. CRC-failed frames are dropped silently; if the
+        remaining atoms are insufficient for fountain recovery the result
+        will have ``"complete": False``.
+    """
+    try:
+        data, stats = _tm_decode(wire, randomise=randomise)
+    except (TypeError, ValueError) as exc:
+        return {
+            "tm_n_frames": 0,
+            "tm_n_crc_errors": 0,
+            "error": f"tm decode error: {exc}",
+        }
+
+    if original_length is not None:
+        data = data[:original_length]
+    astral_result = unpack_stream(data)
+    return {
+        "tm_n_frames": stats["n_frames"],
+        "tm_n_crc_errors": stats["n_crc_errors"],
         **astral_result,
     }

@@ -5,6 +5,8 @@ from .codec import (
     unpack_stream_rs,
     pack_message_sp,
     unpack_stream_sp,
+    pack_message_tm,
+    unpack_frames_tm,
 )
 
 __all__ = [
@@ -14,4 +16,6 @@ __all__ = [
     "unpack_stream_rs",
     "pack_message_sp",
     "unpack_stream_sp",
+    "pack_message_tm",
+    "unpack_frames_tm",
 ]

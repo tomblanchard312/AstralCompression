@@ -10,6 +10,7 @@ from .codec import (
     pack_cmd_batch,
     pack_message_sp,
     unpack_stream_sp,
+    unpack_frames_tm,
 )
 from .spacepacket import (
     SpacePacketSequenceCounter,
@@ -296,6 +297,51 @@ def cmd_decode_rs(args):
     return 0
 
 
+def cmd_frame_tm(args):
+    """Segment an ASTRAL binary into CCSDS TM Transfer Frames."""
+    try:
+        from .tmframe import TmFrameCounter, WIRE_FRAME_SIZE, encode_frames
+
+        data = read_bin(args.input)
+        counter = TmFrameCounter()
+        wire = encode_frames(
+            data,
+            scid=args.scid,
+            vcid=args.vcid,
+            counter=counter,
+            randomise=not args.no_randomise,
+        )
+        write_bin(args.output, wire)
+        n_frames = len(wire) // WIRE_FRAME_SIZE
+        print(
+            f"Framed {len(data)} bytes into {n_frames} TM frames "
+            f"({len(wire)} bytes), SCID={args.scid}, VCID={args.vcid}"
+        )
+    except Exception as exc:
+        print(f"Error framing TM stream: {exc}")
+        return 1
+    return 0
+
+
+def cmd_deframe_tm(args):
+    """Decode CCSDS TM Transfer Frames and recover the ASTRAL stream."""
+    try:
+        wire = read_bin(args.input)
+        result = unpack_frames_tm(wire, randomise=not args.no_randomise)
+
+        # bytes fields are not JSON-serialisable
+        if isinstance(result.get("message"), dict):
+            msg = result["message"]
+            if "bytes" in msg and isinstance(msg["bytes"], bytes):
+                msg["bytes"] = msg["bytes"].hex()
+
+        print(json.dumps(result, indent=2))
+    except Exception as exc:
+        print(f"Error deframing TM stream: {exc}")
+        return 1
+    return 0
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="astral")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -383,6 +429,45 @@ def main(argv=None):
         help="error-correction strength used during encoding (default: 16)",
     )
     p_decode_rs.set_defaults(func=cmd_decode_rs)
+
+    p_frame_tm = sub.add_parser(
+        "frame-tm",
+        help="segment an ASTRAL binary into CCSDS TM Transfer Frames",
+    )
+    p_frame_tm.add_argument(
+        "input", help="ASTRAL binary (or RS-protected) file"
+    )
+    p_frame_tm.add_argument("output", help="TM wire stream output file")
+    p_frame_tm.add_argument(
+        "--scid",
+        type=int,
+        default=42,
+        help="Spacecraft ID 0-1023 (default: 42)",
+    )
+    p_frame_tm.add_argument(
+        "--vcid",
+        type=int,
+        default=0,
+        help="Virtual Channel ID 0-7 (default: 0)",
+    )
+    p_frame_tm.add_argument(
+        "--no-randomise",
+        action="store_true",
+        help="disable CCSDS pseudo-randomizer (default: randomiser ON)",
+    )
+    p_frame_tm.set_defaults(func=cmd_frame_tm)
+
+    p_deframe_tm = sub.add_parser(
+        "deframe-tm",
+        help="decode CCSDS TM Transfer Frames and recover the ASTRAL payload",
+    )
+    p_deframe_tm.add_argument("input", help="TM wire stream file")
+    p_deframe_tm.add_argument(
+        "--no-randomise",
+        action="store_true",
+        help="disable de-randomizer (must match encoding, default: ON)",
+    )
+    p_deframe_tm.set_defaults(func=cmd_deframe_tm)
 
     p_pack_text = sub.add_parser("pack-text", help="pack a TEXT message")
     p_pack_text.add_argument("text")
