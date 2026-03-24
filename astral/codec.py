@@ -5,9 +5,6 @@ import struct
 from .container import make_atom, parse_atoms
 from .container import HEADER_GIST, FOUNTAIN_PACKET
 from .grammar import make_gist_bits, encode_payload, decode_payload
-from .spacepacket import SpacePacketSequenceCounter, wrap as _sp_wrap
-from .rs_fec import encode_stream as _rs_encode, decode_stream as _rs_decode
-from .tmframe import encode_frames as _tm_encode, decode_frames as _tm_decode
 from .grammar import parse_gist
 from .textpack import encode_text, decode_text
 from .commands import (
@@ -37,8 +34,11 @@ def chunk_blocks(payload: bytes, symbol_size: int):
 
 
 def pack_message(
-    msg: dict, message_id: int | None = None, extra_fountain=0
-):
+    msg: dict,
+    message_id: int | None = None,
+    extra_fountain: int = 0,
+    min_redundancy: int = 10,
+) -> bytes:
     # Input validation
     if not isinstance(msg, dict):
         raise ValueError("msg must be a dictionary")
@@ -78,8 +78,8 @@ def pack_message(
     for _ in range(HEADER_REDUNDANCY):
         atoms.append((len(atoms), HEADER_GIST, bytes(header)))
 
-    # 4) Fountain packets - Increased redundancy for better recovery
-    M = K + max(10, K) + int(extra_fountain)
+    # 4) Fountain packets with adaptive minimum redundancy.
+    M = K + max(int(min_redundancy), K) + int(extra_fountain)
     packets = lt_encode_blocks(
         blocks, seed=fountain_seed, num_packets=M
     )
@@ -100,9 +100,10 @@ def pack_message(
 def pack_text_with_dict(
     words: list[str],
     text: str,
-    extra_fountain=0,
+    extra_fountain: int = 0,
     message_id: int | None = None,
-):
+    min_redundancy: int = 10,
+) -> bytes:
     if message_id is None:
         message_id = (int.from_bytes(os.urandom(2), "little") or 1)
     # 1) send dict update atoms
@@ -135,8 +136,8 @@ def pack_text_with_dict(
     # DICT_UPDATE atoms (insert right after header)
     for dp in make_dict_update_atoms(words):
         atoms.append((len(atoms), 2, dp))
-    # Increased redundancy for better recovery
-    M = K + max(10, K) + int(extra_fountain)
+    # Adaptive redundancy floor lets links trade robustness vs throughput.
+    M = K + max(int(min_redundancy), K) + int(extra_fountain)
     packets = lt_encode_blocks(
         blocks, seed=fountain_seed, num_packets=M
     )
@@ -155,8 +156,11 @@ def pack_text_with_dict(
 
 
 def pack_text_message(
-    text: str, extra_fountain=0, message_id: int | None = None
-):
+    text: str,
+    extra_fountain: int = 0,
+    message_id: int | None = None,
+    min_redundancy: int = 10,
+) -> bytes:
     # Input validation
     if not isinstance(text, str):
         raise ValueError("text must be a string")
@@ -165,51 +169,74 @@ def pack_text_message(
 
     msg = {"type": "TEXT", "conf": 0.99}
     return _pack_with_custom_payload(
-        msg, encode_text(text), extra_fountain, message_id
+        msg,
+        encode_text(text),
+        extra_fountain,
+        message_id,
+        min_redundancy,
     )
 
 
 def pack_cmd_message(
     cmd: dict,
-    extra_fountain=0,
+    extra_fountain: int = 0,
     message_id: int | None = None,
     key: bytes | None = None,
-):
+    min_redundancy: int = 10,
+) -> bytes:
     payload = encode_cmd(cmd, key=key)
     msg = {"type": "CMD", "conf": 0.99}
     return _pack_with_custom_payload(
-        msg, payload, extra_fountain, message_id
+        msg,
+        payload,
+        extra_fountain,
+        message_id,
+        min_redundancy,
     )
 
 
 def pack_voice_message(
     wav_path: str,
-    extra_fountain=0,
+    extra_fountain: int = 0,
     message_id: int | None = None,
-):
+    min_redundancy: int = 10,
+) -> bytes:
     payload = encode_wav_to_bitstream(wav_path)
     msg = {"type": "VOICE", "conf": 0.9}
     return _pack_with_custom_payload(
-        msg, payload, extra_fountain, message_id
+        msg,
+        payload,
+        extra_fountain,
+        message_id,
+        min_redundancy,
     )
 
 
 def pack_cmd_batch(
     batch: dict,
-    extra_fountain=0,
+    extra_fountain: int = 0,
     message_id: int | None = None,
     key: bytes | None = None,
-):
+    min_redundancy: int = 10,
+) -> bytes:
     payload = encode_cmd_batch(batch, key=key)
     msg = {"type": "CMD_BATCH", "conf": 0.99}
     return _pack_with_custom_payload(
-        msg, payload, extra_fountain, message_id
+        msg,
+        payload,
+        extra_fountain,
+        message_id,
+        min_redundancy,
     )
 
 
 def _pack_with_custom_payload(
-    msgmeta: dict, payload: bytes, extra_fountain=0, message_id=None
-):
+    msgmeta: dict,
+    payload: bytes,
+    extra_fountain: int = 0,
+    message_id: int | None = None,
+    min_redundancy: int = 10,
+) -> bytes:
     if message_id is None:
         message_id = (int.from_bytes(os.urandom(2), "little") or 1)
     gist_bytes, gist_bits = make_gist_bits(msgmeta)
@@ -236,7 +263,7 @@ def _pack_with_custom_payload(
     atoms = []
     for _ in range(HEADER_REDUNDANCY):
         atoms.append((len(atoms), HEADER_GIST, bytes(header)))
-    M = K + max(10, K) + int(extra_fountain)
+    M = K + max(int(min_redundancy), K) + int(extra_fountain)
     packets = lt_encode_blocks(
         blocks, seed=fountain_seed, num_packets=M
     )
@@ -359,7 +386,7 @@ def unpack_stream(stream: bytes):
 
 def pack_message_sp(
     msg: dict,
-    counter: SpacePacketSequenceCounter,
+    counter,
     message_id: int | None = None,
     extra_fountain: int = 0,
 ) -> bytes:
@@ -382,6 +409,8 @@ def pack_message_sp(
     bytes
         Complete CCSDS Space Packet (6-byte header + ASTRAL atom stream).
     """
+    from .spacepacket import SpacePacketSequenceCounter, wrap as _sp_wrap  # noqa: F401
+
     astral_stream = pack_message(
         msg, message_id=message_id, extra_fountain=extra_fountain
     )
@@ -466,6 +495,8 @@ def pack_message_rs(
         RS-protected byte stream: one 64-byte (E=16) or 48-byte (E=8)
         codeword per source atom.
     """
+    from .rs_fec import encode_stream as _rs_encode
+
     astral_stream = pack_message(
         msg, message_id=message_id, extra_fountain=extra_fountain
     )
@@ -502,6 +533,8 @@ def unpack_stream_rs(rs_stream: bytes, e: int = 16) -> dict:
         The function never raises. If RS decoding fails entirely it returns
         ``{"error": "<reason>", "rs_e": e}``.
     """
+    from .rs_fec import decode_stream as _rs_decode
+
     try:
         astral_stream, n_corrected, n_uncorrectable = _rs_decode(
             rs_stream, e=e
@@ -553,6 +586,8 @@ def pack_message_tm(
         Concatenated wire-format TM Transfer Frames (each 1119 bytes),
         ready to hand to the modulator.
     """
+    from .tmframe import encode_frames as _tm_encode
+
     astral_stream = pack_message(
         msg, message_id=message_id, extra_fountain=extra_fountain
     )
@@ -602,6 +637,9 @@ def unpack_frames_tm(
         remaining atoms are insufficient for fountain recovery the result
         will have ``"complete": False``.
     """
+    from .tmframe import encode_frames as _tm_encode  # noqa: F401
+    from .tmframe import decode_frames as _tm_decode
+
     try:
         data, stats = _tm_decode(wire, randomise=randomise)
     except (TypeError, ValueError) as exc:

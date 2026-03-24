@@ -66,6 +66,28 @@ class TestPackUnpack:
         assert result["complete"]
         assert result["message"]["type"] == "CMD_BATCH"
 
+    def test_min_redundancy_zero(self, detect_msg):
+        """min_redundancy=0 produces a much smaller stream."""
+        blob_default = pack_message(detect_msg, extra_fountain=0)
+        blob_zero = pack_message(
+            detect_msg,
+            extra_fountain=0,
+            min_redundancy=0,
+        )
+        assert len(blob_zero) < len(blob_default)
+        result = unpack_stream(blob_zero)
+        assert result["complete"]
+
+    def test_min_redundancy_preserves_default(self, detect_msg):
+        """Default min_redundancy=10 gives same output as before."""
+        blob_default = pack_message(detect_msg, extra_fountain=0)
+        blob_explicit = pack_message(
+            detect_msg,
+            extra_fountain=0,
+            min_redundancy=10,
+        )
+        assert len(blob_default) == len(blob_explicit)
+
 
 class TestLossTolerance:
     def test_survives_30_percent_loss(self, detect_msg):

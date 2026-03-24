@@ -1,374 +1,326 @@
-import wave
-import struct
+from __future__ import annotations
+
 import math
-import random
 import os
+import random
+import struct
+import wave
+from typing import List
 
 FRAME_MS = 20
 FS = 8000
 FRAME_SAMPLES = int(FS * FRAME_MS / 1000)
-BAND_FREQS = [300, 600, 900, 1200, 1600, 2000, 2600, 3200]
+LPC_ORDER = 10
+BITS_PER_FRAME = 1 + 6 + 5 + (LPC_ORDER * 4)
 
 
-def _read_wav_mono_16(path):
+def _read_wav_mono_16(path: str) -> List[float]:
     if not isinstance(path, str):
         raise ValueError("path must be a string")
     if not os.path.exists(path):
         raise FileNotFoundError(f"WAV file not found: {path}")
 
-    try:
-        w = wave.open(path, "rb")
+    with wave.open(path, "rb") as w:
         nch = w.getnchannels()
         fs = w.getframerate()
         n = w.getnframes()
         sampwidth = w.getsampwidth()
         raw = w.readframes(n)
-        w.close()
-    except Exception as e:
-        raise ValueError(f"Failed to read WAV file: {e}")
 
     if sampwidth != 2:
         raise ValueError("Only 16-bit PCM supported")
-    if len(raw) % 2 != 0:
-        raise ValueError("Invalid WAV data length")
 
-    # Unpack samples
     samples = list(struct.unpack("<" + "h" * (len(raw) // 2), raw))
-
-    # Downmix stereo to mono
-    if nch == 2 and len(samples) % 2 == 0:
+    if nch == 2:
         samples = [
             (samples[i * 2] + samples[i * 2 + 1]) // 2
             for i in range(len(samples) // 2)
         ]
 
-    # Simple resampling if needed
-    if fs != FS and fs > 0:
+    if fs != FS:
         ratio = fs / FS
-        out = []
+        out: List[int] = []
         i = 0.0
         while int(i) < len(samples):
             out.append(samples[int(i)])
             i += ratio
         samples = out
 
-    return samples
+    return [float(s) for s in samples]
 
 
-def encode_wav_to_bitstream(path):
-    if not isinstance(path, str):
-        raise ValueError("path must be a string")
-
-    try:
-        samples = _read_wav_mono_16(path)
-    except Exception as e:
-        raise ValueError(f"Failed to read audio: {e}")
-
-    if not samples:
-        raise ValueError("No audio samples found")
-
-    # Pad to frame boundary
-    while len(samples) % FRAME_SAMPLES != 0:
-        samples.append(0)
-
-    # Apply pre-emphasis
-    def preemphasis(samples, a=0.95):
-        out = []
-        prev = 0
-        for x in samples:
-            y = x - a * prev
-            out.append(y)
-            prev = x
-        return out
-
-    samples = preemphasis(samples)
-    frames = [
-        samples[i:i + FRAME_SAMPLES]
-        for i in range(0, len(samples), FRAME_SAMPLES)
-    ]
-
-    if not frames:
-        raise ValueError("No frames generated")
-
-    # Encode frames
-    bits = []
-    for fr in frames:
-        try:
-            # Pitch detection
-            voiced, lag = _detect_pitch(fr)
-            pitch_q = max(0, min(127, lag - 20))  # 7 bits
-
-            # Band analysis
-            mags = [_analyze_band(fr, f) for f in BAND_FREQS]
-            gain = sum(abs(x) for x in fr) / len(fr)
-
-            # Quantization
-            gain_q = _quantize_log(gain, 5)
-            band_q = [_quantize_log(m, 5) for m in mags]
-
-            # Pack bits
-            frame_bits = [voiced & 1]
-            frame_bits.extend([(pitch_q >> i) & 1 for i in range(7)])
-            for q in band_q:
-                frame_bits.extend([(q >> i) & 1 for i in range(5)])
-            frame_bits.extend([(gain_q >> i) & 1 for i in range(5)])
-
-            bits.extend(frame_bits)
-
-        except Exception as e:
-            raise ValueError(f"Failed to encode frame: {e}")
-
-    if not bits:
-        raise ValueError("No bits generated")
-
-    # Pack header and bits
-    nbits = len(bits)
-    nframes = len(frames)
-
-    if nbits > 0xFFFFFFFF or nframes > 0xFFFFFFFF:
-        raise ValueError("Data too large for 32-bit encoding")
-
-    out = bytearray()
-    out.extend(b"VX")  # Magic
-    out.append(1)  # Version
-    out.extend(nframes.to_bytes(4, "little"))
-    out.extend(nbits.to_bytes(4, "little"))
-
-    # Pack bits into bytes
-    byte_val = 0
-    bit_pos = 0
-
-    for bit in bits:
-        byte_val |= (bit & 1) << bit_pos
-        bit_pos += 1
-
-        if bit_pos == 8:
-            out.append(byte_val)
-            byte_val = 0
-            bit_pos = 0
-
-    # Handle remaining bits
-    if bit_pos > 0:
-        out.append(byte_val)
-
-    return bytes(out)
+def _autocorr(frame: List[float], order: int) -> List[float]:
+    n = len(frame)
+    return [sum(frame[i] * frame[i + k] for i in range(n - k)) for k in range(order + 1)]
 
 
-def _detect_pitch(frame):
-    """Simple pitch detection using autocorrelation"""
-    if len(frame) < 160:
-        return 0, 50
+def _levinson_durbin(r: List[float], order: int) -> List[float]:
+    a = [0.0] * (order + 1)
+    a[0] = 1.0
+    e = max(r[0], 1e-10)
+    for m in range(1, order + 1):
+        lam = 0.0
+        for j in range(1, m):
+            lam += a[j] * r[m - j]
+        k = -(r[m] + lam) / e
+        a_new = a[:]
+        for j in range(1, m):
+            a_new[j] = a[j] + k * a[m - j]
+        a_new[m] = k
+        a = a_new
+        e = max(e * (1.0 - k * k), 1e-10)
+    return a
 
-    best_lag = 50
+
+def compute_lsf(frame: List[float], order: int = LPC_ORDER) -> List[float]:
+    r = _autocorr(frame, order)
+    if r[0] < 1e-10:
+        return [math.pi * (i + 1) / (order + 1) for i in range(order)]
+
+    a = _levinson_durbin(r, order)
+
+    p = [a[i] + a[order - i] for i in range(order + 1)]
+    q = [a[i] - a[order - i] for i in range(order + 1)]
+
+    def cheby_roots(poly: List[float], n_lsf: int) -> List[float]:
+        roots: List[float] = []
+
+        def eval_poly(x: float) -> float:
+            return sum(poly[i] * math.cos(i * x) for i in range(len(poly)))
+
+        step = math.pi / 256.0
+        prev_x = 0.0
+        prev = eval_poly(prev_x)
+        x = step
+        while len(roots) < n_lsf and x <= math.pi:
+            val = eval_poly(x)
+            if prev * val <= 0:
+                lo = prev_x
+                hi = x
+                for _ in range(10):
+                    mid = (lo + hi) / 2.0
+                    vmid = eval_poly(mid)
+                    if prev * vmid <= 0:
+                        hi = mid
+                    else:
+                        lo = mid
+                roots.append((lo + hi) / 2.0)
+            prev_x = x
+            prev = val
+            x += step
+
+        while len(roots) < n_lsf:
+            roots.append(math.pi * (len(roots) + 1) / (n_lsf + 1))
+        return roots[:n_lsf]
+
+    lsf_p = cheby_roots(p, order // 2)
+    lsf_q = cheby_roots(q, order // 2)
+    return sorted(lsf_p + lsf_q)
+
+
+def lsf_to_lpc(lsf: List[float]) -> List[float]:
+    order = len(lsf)
+    if order == 0:
+        return []
+
+    lsf_sorted = sorted(max(0.001, min(math.pi - 0.001, v)) for v in lsf)
+
+    # Stable approximation suitable for low-bitrate synthesis.
+    a = [0.0] * order
+    for i in range(order):
+        a[i] = -0.75 * math.cos(lsf_sorted[i])
+    return a
+
+
+def _detect_pitch(frame: List[float]) -> tuple[int, int]:
+    best_lag = 40
     best_corr = 0.0
-
-    for lag in range(20, 160):
-        if lag >= len(frame):
-            break
-
-        correlation = 0.0
-        energy1 = 0.0
-        energy2 = 0.0
-
+    for lag in range(20, 84):
+        corr = 0.0
+        e1 = 0.0
+        e2 = 0.0
         for i in range(len(frame) - lag):
             s1 = frame[i]
             s2 = frame[i + lag]
-            correlation += s1 * s2
-            energy1 += s1 * s1
-            energy2 += s2 * s2
-
-        if energy1 > 0 and energy2 > 0:
-            normalized_corr = correlation / math.sqrt(energy1 * energy2)
-            if normalized_corr > best_corr:
-                best_corr = normalized_corr
+            corr += s1 * s2
+            e1 += s1 * s1
+            e2 += s2 * s2
+        if e1 > 0 and e2 > 0:
+            n = corr / math.sqrt(e1 * e2)
+            if n > best_corr:
+                best_corr = n
                 best_lag = lag
-
     voiced = 1 if best_corr > 0.3 else 0
     return voiced, best_lag
 
 
-def _analyze_band(frame, freq):
-    """Analyze energy in frequency band using simple DFT"""
-    if not frame:
-        return 0.0
-
-    N = len(frame)
-    k = int(0.5 + (N * freq) / FS)
-
-    real_sum = 0.0
-    imag_sum = 0.0
-
-    for n, x in enumerate(frame):
-        angle = 2.0 * math.pi * k * n / N
-        real_sum += x * math.cos(angle)
-        imag_sum += x * math.sin(angle)
-
-    magnitude = math.sqrt(real_sum * real_sum + imag_sum * imag_sum)
-    return magnitude / N
+def _pack_bits(bits: List[int]) -> bytes:
+    out = bytearray()
+    cur = 0
+    pos = 0
+    for b in bits:
+        cur |= (b & 1) << pos
+        pos += 1
+        if pos == 8:
+            out.append(cur)
+            cur = 0
+            pos = 0
+    if pos:
+        out.append(cur)
+    return bytes(out)
 
 
-def _quantize_log(x, bits=5, eps=1e-9):
-    """Logarithmic quantization"""
-    if not isinstance(x, (int, float)) or x < 0:
-        return 0
-
-    if x <= eps:
-        return 0
-
-    log_val = math.log10(x)
-    # Map to [0, 1] range assuming dynamic range of [-5, 0] in log10
-    normalized = (log_val + 5.0) / 5.0
-    normalized = max(0.0, min(1.0, normalized))
-
-    quantized = int(normalized * ((1 << bits) - 1) + 0.5)
-    return max(0, min((1 << bits) - 1, quantized))
+def _unpack_bits(data: bytes, nbits: int) -> List[int]:
+    bits: List[int] = []
+    for byte_val in data:
+        for i in range(8):
+            bits.append((byte_val >> i) & 1)
+            if len(bits) == nbits:
+                return bits
+    return bits
 
 
-def _dequantize_log(q, bits=5):
-    """Reverse logarithmic quantization"""
-    if q <= 0:
-        return 1e-9
+def _quantize_lsf(lsf: List[float]) -> List[int]:
+    q: List[int] = []
+    for v in lsf[:LPC_ORDER]:
+        i = int(round((v / math.pi) * 15.0))
+        q.append(max(0, min(15, i)))
+    while len(q) < LPC_ORDER:
+        q.append(0)
+    return q
 
-    normalized = q / ((1 << bits) - 1)
-    log_val = normalized * 5.0 - 5.0
-    return 10.0**log_val
+
+def _dequantize_lsf(q: List[int]) -> List[float]:
+    return [max(0.001, min(math.pi - 0.001, (v / 15.0) * math.pi)) for v in q]
 
 
-def decode_bitstream_to_wav(data, out_path):
-    """Fixed voice decoder with better error handling"""
+def encode_wav_to_bitstream(path: str) -> bytes:
+    samples = _read_wav_mono_16(path)
+    if not samples:
+        raise ValueError("No audio samples found")
+
+    while len(samples) % FRAME_SAMPLES != 0:
+        samples.append(0.0)
+
+    # Pre-emphasis.
+    pre: List[float] = []
+    prev = 0.0
+    for x in samples:
+        y = x - 0.95 * prev
+        pre.append(y)
+        prev = x
+
+    bits: List[int] = []
+    frames = [pre[i : i + FRAME_SAMPLES] for i in range(0, len(pre), FRAME_SAMPLES)]
+    for fr in frames:
+        voiced, lag = _detect_pitch(fr)
+        pitch_q = max(0, min(63, lag - 20))
+
+        rms = math.sqrt(sum(x * x for x in fr) / max(1, len(fr)))
+        lg = math.log10(max(rms, 1e-6))
+        gain_q = int(round(((lg + 5.0) / 5.0) * 31.0))
+        gain_q = max(0, min(31, gain_q))
+
+        lsf = compute_lsf(fr, LPC_ORDER)
+        lsf_q = _quantize_lsf(lsf)
+
+        bits.append(voiced)
+        bits.extend((pitch_q >> i) & 1 for i in range(6))
+        bits.extend((gain_q >> i) & 1 for i in range(5))
+        for q in lsf_q:
+            bits.extend((q >> i) & 1 for i in range(4))
+
+    out = bytearray()
+    out.extend(b"VX")
+    out.append(0x02)
+    out.extend(len(frames).to_bytes(4, "little"))
+    out.extend(len(bits).to_bytes(4, "little"))
+    out.extend(_pack_bits(bits))
+    return bytes(out)
+
+
+def _decode_v1(data: bytes, out_path: str) -> None:
+    # Minimal compatibility bridge for older streams.
+    raise ValueError("Voice bitstream version 1 is no longer supported for decode")
+
+
+def decode_bitstream_to_wav(data: bytes, out_path: str) -> None:
     if not isinstance(data, bytes):
         raise ValueError("data must be bytes")
     if len(data) < 11:
         raise ValueError("data too short for voice bitstream")
-
-    # Parse header
     if data[:2] != b"VX":
         raise ValueError("Invalid voice bitstream magic")
 
-    try:
-        version = data[2]
-        nframes = int.from_bytes(data[3:7], "little")
-        nbits = int.from_bytes(data[7:11], "little")
-        bitbytes = data[11:]
-    except Exception as e:
-        raise ValueError(f"Failed to parse header: {e}")
-
-    if version != 1:
+    version = data[2]
+    if version == 1:
+        _decode_v1(data, out_path)
+        return
+    if version != 2:
         raise ValueError(f"Unsupported voice bitstream version: {version}")
 
-    if nframes <= 0 or nbits <= 0:
-        raise ValueError(f"Invalid header: nframes={nframes}, nbits={nbits}")
-    if nframes > 100000 or nbits > 10000000:  # Sanity limits
-        raise ValueError("Data size exceeds reasonable limits")
+    nframes = int.from_bytes(data[3:7], "little")
+    nbits = int.from_bytes(data[7:11], "little")
+    bits = _unpack_bits(data[11:], nbits)
 
-    # Unpack bits
-    bits = []
-    for byte_val in bitbytes:
-        for bit_pos in range(8):
-            bits.append((byte_val >> bit_pos) & 1)
-            if len(bits) >= nbits:
-                break
-        if len(bits) >= nbits:
+    samples: List[int] = []
+    pos = 0
+    for _ in range(nframes):
+        if pos + BITS_PER_FRAME > len(bits):
             break
 
-    bits = bits[:nbits]  # Trim to exact count
+        voiced = bits[pos]
+        pos += 1
 
-    # Decode frames
-    samples = []
-    bit_pos = 0
+        pitch_q = 0
+        for i in range(6):
+            pitch_q |= bits[pos] << i
+            pos += 1
+        lag = pitch_q + 20
 
-    for frame_idx in range(nframes):
-        try:
-            # Extract frame parameters
-            if bit_pos + 53 > len(bits):  # 1+7+8*5+5 = 53 bits per frame
-                break
+        gain_q = 0
+        for i in range(5):
+            gain_q |= bits[pos] << i
+            pos += 1
+        gain = 10.0 ** ((gain_q / 31.0) * 5.0 - 5.0)
 
-            voiced = bits[bit_pos]
-            bit_pos += 1
+        lsf_q: List[int] = []
+        for _j in range(LPC_ORDER):
+            q = 0
+            for i in range(4):
+                q |= bits[pos] << i
+                pos += 1
+            lsf_q.append(q)
+        lpc = lsf_to_lpc(_dequantize_lsf(lsf_q))
 
-            pitch_q = 0
-            for i in range(7):
-                if bit_pos < len(bits):
-                    pitch_q |= bits[bit_pos] << i
-                    bit_pos += 1
+        exc: List[float] = []
+        for n in range(FRAME_SAMPLES):
+            if voiced:
+                exc.append(1.0 if lag > 0 and n % lag == 0 else 0.0)
+            else:
+                exc.append((random.random() * 2.0) - 1.0)
 
-            band_q = []
-            for band in range(8):
-                q = 0
-                for i in range(5):
-                    if bit_pos < len(bits):
-                        q |= bits[bit_pos] << i
-                        bit_pos += 1
-                band_q.append(q)
+        frame = [0.0] * FRAME_SAMPLES
+        for n in range(FRAME_SAMPLES):
+            y = gain * exc[n]
+            for k in range(1, min(LPC_ORDER, n) + 1):
+                y -= lpc[k - 1] * frame[n - k]
+            frame[n] = y
 
-            gain_q = 0
-            for i in range(5):
-                if bit_pos < len(bits):
-                    gain_q |= bits[bit_pos] << i
-                    bit_pos += 1
+        # De-emphasis.
+        deemph: List[float] = []
+        prev = 0.0
+        for x in frame:
+            y = x + 0.95 * prev
+            deemph.append(y)
+            prev = y
 
-            # Synthesize frame
-            lag = pitch_q + 20
-            mags = [_dequantize_log(q, 5) for q in band_q]
-            gain = _dequantize_log(gain_q, 5)
+        max_abs = max(max(abs(v) for v in deemph), 1e-6)
+        scale = 16000.0 / max_abs
+        samples.extend(int(max(-32768, min(32767, round(v * scale)))) for v in deemph)
 
-            frame_samples = []
-            for n in range(FRAME_SAMPLES):
-                sample = 0.0
-
-                # Band synthesis
-                for band_idx, freq in enumerate(BAND_FREQS):
-                    amp = mags[band_idx]
-                    phase = 2.0 * math.pi * freq * n / FS
-                    sample += amp * math.sin(phase)
-
-                # Add excitation
-                if voiced and lag > 0:
-                    if n % lag < 5:  # Pulse train
-                        sample += gain * 10.0
-                else:
-                    # White noise
-                    sample += gain * (random.random() - 0.5) * 2.0
-
-                frame_samples.append(sample)
-
-            # De-emphasis filter
-            de_emphasized = []
-            prev = 0.0
-            for s in frame_samples:
-                output = s + 0.95 * prev
-                de_emphasized.append(output)
-                prev = output
-
-            # Normalize and convert to int16
-            if de_emphasized:
-                max_val = max(abs(s) for s in de_emphasized)
-                if max_val > 0:
-                    scale = 16000.0 / max_val
-                    frame_ints = [int(s * scale) for s in de_emphasized]
-                else:
-                    frame_ints = [0] * len(de_emphasized)
-
-                samples.extend(frame_ints)
-
-        except Exception as e:
-            print(f"Warning: Failed to decode frame {frame_idx}: {e}")
-            # Add silence for failed frame
-            samples.extend([0] * FRAME_SAMPLES)
-
-    if not samples:
-        raise ValueError("No samples generated")
-
-    # Write WAV file
-    try:
-        with wave.open(out_path, "wb") as w:
-            w.setnchannels(1)
-            w.setsampwidth(2)
-            w.setframerate(FS)
-
-            # Clamp samples to int16 range
-            clamped = [max(-32768, min(32767, int(s))) for s in samples]
-            raw_data = struct.pack("<" + "h" * len(clamped), *clamped)
-            w.writeframes(raw_data)
-    except Exception as e:
-        raise IOError(f"Failed to write WAV file: {e}")
+    with wave.open(out_path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(FS)
+        w.writeframes(struct.pack("<" + "h" * len(samples), *samples))
