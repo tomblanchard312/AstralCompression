@@ -1,7 +1,9 @@
 import os
+import struct
 from .container import make_atom, parse_atoms
 from .container import HEADER_GIST, FOUNTAIN_PACKET
 from .grammar import make_gist_bits, encode_payload, decode_payload
+from .spacepacket import SpacePacketSequenceCounter, wrap as _sp_wrap
 from .grammar import parse_gist
 from .textpack import encode_text, decode_text
 from .commands import (
@@ -323,4 +325,86 @@ def unpack_stream(stream: bytes):
         "complete": complete,
         "recovered_fraction": recovered_fraction,
         "message": message,
+    }
+
+
+def pack_message_sp(
+    msg: dict,
+    counter: SpacePacketSequenceCounter,
+    message_id: int | None = None,
+    extra_fountain: int = 0,
+) -> bytes:
+    """
+    Pack a telemetry/command message and wrap it in a CCSDS Space Packet.
+
+    Parameters
+    ----------
+    msg : dict
+        Message dict with at least a ``type`` key.
+    counter : SpacePacketSequenceCounter
+        Sequence counter; advanced once per call.
+    message_id : int, optional
+        ASTRAL message ID (16-bit). Generated randomly if omitted.
+    extra_fountain : int
+        Extra fountain redundancy packets.
+
+    Returns
+    -------
+    bytes
+        Complete CCSDS Space Packet (6-byte header + ASTRAL atom stream).
+    """
+    astral_stream = pack_message(
+        msg, message_id=message_id, extra_fountain=extra_fountain
+    )
+    return _sp_wrap(astral_stream, msg["type"], counter)
+
+
+def unpack_stream_sp(packet: bytes) -> dict:
+    """
+    Unwrap a CCSDS Space Packet and decode the enclosed ASTRAL stream.
+
+    Parameters
+    ----------
+    packet : bytes
+        A complete CCSDS Space Packet as produced by ``pack_message_sp``
+        or any conforming encoder.
+
+    Returns
+    -------
+    dict
+        A merged dict with Space Packet header fields and the decoded
+        ASTRAL payload::
+
+            {
+                "apid":             int,
+                "packet_type":      int,
+                "seq_count":        int,
+                "msg_type":         str,
+                # --- all keys from unpack_stream() ---
+                "message_id":       int,
+                "total_atoms":      int,
+                "received_atoms":   int,
+                "gist":             dict,
+                "complete":         bool,
+                "recovered_fraction": float,
+                "message":          dict | None,
+            }
+
+    The function never raises — if the Space Packet header is invalid it
+    returns ``{"error": "<reason>"}``; if ASTRAL decoding fails the
+    ``unpack_stream`` error key is preserved.
+    """
+    from .spacepacket import unwrap as _sp_unwrap
+
+    try:
+        sp = _sp_unwrap(packet)
+    except (ValueError, struct.error) as exc:
+        return {"error": f"space packet parse error: {exc}"}
+    astral_result = unpack_stream(sp["astral_stream"])
+    return {
+        "apid": sp["apid"],
+        "packet_type": sp["packet_type"],
+        "seq_count": sp["seq_count"],
+        "msg_type": sp["msg_type"],
+        **astral_result,
     }

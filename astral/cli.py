@@ -7,6 +7,12 @@ from .codec import (
     pack_cmd_message,
     pack_text_with_dict,
     pack_cmd_batch,
+    pack_message_sp,
+    unpack_stream_sp,
+)
+from .spacepacket import (
+    SpacePacketSequenceCounter,
+    APID_MAP,
 )
 from .voice import decode_bitstream_to_wav
 
@@ -197,6 +203,42 @@ def cmd_pack_cmd_batch(args):
     return 0
 
 
+def cmd_wrap_sp(args):
+    try:
+        astral_stream = read_bin(args.input)
+        if args.msg_type not in APID_MAP:
+            print(f"Error: msg_type '{args.msg_type}' not in APID_MAP. Valid types: {list(APID_MAP.keys())}")
+            return 1
+        counter = SpacePacketSequenceCounter()
+        apid = APID_MAP[args.msg_type][0]
+        if args.seq_count is not None:
+            counter._counts[apid] = args.seq_count % 16384
+        packet = pack_message_sp(
+            {"type": args.msg_type, "data": astral_stream},
+            counter,
+        )
+        write_bin(args.output, packet)
+        print(f"Wrapped {len(astral_stream)} bytes into Space Packet ({len(packet)} bytes total).")
+    except Exception as e:
+        print(f"Error wrapping Space Packet: {e}")
+        return 1
+    return 0
+
+
+def cmd_unwrap_sp(args):
+    try:
+        packet = read_bin(args.input)
+        result = unpack_stream_sp(packet)
+        if "error" in result:
+            print(f"Error: {result['error']}")
+            return 1
+        print(json.dumps(result, indent=2))
+    except Exception as e:
+        print(f"Error unwrapping Space Packet: {e}")
+        return 1
+    return 0
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="astral")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -222,6 +264,17 @@ def main(argv=None):
         "--drop", type=float, default=0.3, help="probability to drop each atom [0..1]"
     )
     p_sim.set_defaults(func=cmd_simulate)
+
+    p_wrap_sp = sub.add_parser("wrap-sp", help="wrap ASTRAL binary in CCSDS Space Packet")
+    p_wrap_sp.add_argument("input", help="ASTRAL binary stream")
+    p_wrap_sp.add_argument("output", help="Space Packet output file")
+    p_wrap_sp.add_argument("--msg-type", default="DETECT", help="message type (default: DETECT)")
+    p_wrap_sp.add_argument("--seq-count", type=int, default=None, help="optional initial sequence counter (0-16383)")
+    p_wrap_sp.set_defaults(func=cmd_wrap_sp)
+
+    p_unwrap_sp = sub.add_parser("unwrap-sp", help="unwrap CCSDS Space Packet to ASTRAL")
+    p_unwrap_sp.add_argument("input", help="Space Packet input file")
+    p_unwrap_sp.set_defaults(func=cmd_unwrap_sp)
 
     p_pack_text = sub.add_parser("pack-text", help="pack a TEXT message")
     p_pack_text.add_argument("text")
