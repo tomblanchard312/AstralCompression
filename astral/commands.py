@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import hmac
 import hashlib
-from .bitstream import BitWriter
 from .varint import leb128_encode, leb128_decode
 
 # Command IDs (extend as needed)
@@ -22,14 +21,11 @@ CMD_IDS = {
 MODE_IDS = {"SAFE": 0, "NORMAL": 1, "SCIENCE": 2}
 
 
-def _write_sbits(bw: BitWriter, val: int, bits: int):
-    mask = (1 << bits) - 1
-    if val < 0:
-        val = ((-val) ^ mask) + 1
-    bw.write_bits(val & mask, bits)
-
-
-def encode_cmd(cmd: dict, key: bytes | None = None) -> bytes:
+def encode_cmd(
+    cmd: dict,
+    key: bytes | None = None,
+    counter: int = 0,
+) -> bytes:
     """cmd example:
     {"name":"POINT","az":-12.3456,"el":30.0}
     or {"name":"SET_MODE","mode":"SCIENCE"}
@@ -79,12 +75,19 @@ def encode_cmd(cmd: dict, key: bytes | None = None) -> bytes:
         pass
 
     if key:
-        mac = hmac.new(key, out, hashlib.sha256).digest()
-        out += mac
+        counter_bytes = counter.to_bytes(4, "big")
+        mac = hmac.new(
+            key, counter_bytes + bytes(out), hashlib.sha256
+        ).digest()
+        out += counter_bytes + mac
     return bytes(out)
 
 
-def decode_cmd(b: bytes, key: bytes | None = None) -> dict:
+def decode_cmd(
+    b: bytes,
+    key: bytes | None = None,
+    counter: int | None = None,
+) -> dict:
     # Input validation
     if not isinstance(b, bytes):
         raise ValueError("b must be bytes")
@@ -136,20 +139,30 @@ def decode_cmd(b: bytes, key: bytes | None = None) -> dict:
         pass
 
     if key:
-        # verify MAC if present
-        if len(b) - pos >= 32:
-            mac = b[-32:]
-            body = b[:len(b) - 32]
-            expected = hmac.new(key, body, hashlib.sha256).digest()
-            ok = hmac.compare_digest(expected, mac)
-            out["auth_ok"] = ok  # type: ignore
+        if len(b) - pos >= 36:
+            counter_bytes = b[-36:-32]
+            mac_recv = b[-32:]
+            body = b[:len(b) - 36]
+            mac_expected = hmac.new(
+                key, counter_bytes + body, hashlib.sha256
+            ).digest()
+            auth_ok = hmac.compare_digest(mac_expected, mac_recv)
+            out["auth_ok"] = auth_ok  # type: ignore
+            out["counter"] = int.from_bytes(counter_bytes, "big")  # type: ignore
+            if counter is not None:
+                out["counter_ok"] = out["counter"] == counter  # type: ignore
         else:
             out["auth_ok"] = False  # type: ignore
+            out["counter"] = None  # type: ignore
 
     return out
 
 
-def encode_cmd_batch(batch: dict, key: bytes | None = None) -> bytes:
+def encode_cmd_batch(
+    batch: dict,
+    key: bytes | None = None,
+    counter: int = 0,
+) -> bytes:
     # Input validation
     if not isinstance(batch, dict):
         raise ValueError("batch must be a dictionary")
@@ -187,12 +200,19 @@ def encode_cmd_batch(batch: dict, key: bytes | None = None) -> bytes:
         out += leb128_encode(len(body))
         out += body
     if key:
-        mac = hmac.new(key, out, hashlib.sha256).digest()
-        out += mac
+        counter_bytes = counter.to_bytes(4, "big")
+        mac = hmac.new(
+            key, counter_bytes + bytes(out), hashlib.sha256
+        ).digest()
+        out += counter_bytes + mac
     return bytes(out)
 
 
-def decode_cmd_batch(b: bytes, key: bytes | None = None) -> dict:
+def decode_cmd_batch(
+    b: bytes,
+    key: bytes | None = None,
+    counter: int | None = None,
+) -> dict:
     # Input validation
     if not isinstance(b, bytes):
         raise ValueError("b must be bytes")
@@ -218,10 +238,20 @@ def decode_cmd_batch(b: bytes, key: bytes | None = None) -> dict:
         },
         "items": items,
     }
-    if key and len(b) - pos >= 32:
-        mac = b[-32:]
-        body = b[: len(b) - 32]
-        expected = hmac.new(key, body, hashlib.sha256).digest()
-        ok = hmac.compare_digest(expected, mac)
-        out["auth_ok"] = ok  # type: ignore
+    if key:
+        if len(b) - pos >= 36:
+            counter_bytes = b[-36:-32]
+            mac_recv = b[-32:]
+            body = b[: len(b) - 36]
+            mac_expected = hmac.new(
+                key, counter_bytes + body, hashlib.sha256
+            ).digest()
+            auth_ok = hmac.compare_digest(mac_expected, mac_recv)
+            out["auth_ok"] = auth_ok  # type: ignore
+            out["counter"] = int.from_bytes(counter_bytes, "big")  # type: ignore
+            if counter is not None:
+                out["counter_ok"] = out["counter"] == counter  # type: ignore
+        else:
+            out["auth_ok"] = False  # type: ignore
+            out["counter"] = None  # type: ignore
     return out

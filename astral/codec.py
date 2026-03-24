@@ -62,11 +62,17 @@ def pack_message(
     header[1] = (K >> 8) & 0xFF
     header[2] = SYMBOL_SIZE & 0xFF
     header[3:7] = fountain_seed.to_bytes(4, "little")
+    if payload_len > 0xFFFFFF:
+        raise ValueError(
+            f"payload too large for ASTRAL header: {payload_len} bytes "
+            f"(max 16,777,215)"
+        )
     header[7] = payload_len & 0xFF
     header[8] = (payload_len >> 8) & 0xFF
-    header[9] = gist_bits & 0xFF
-    gist_room = 21 - 10
-    header[10: 10 + min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
+    header[9] = (payload_len >> 16) & 0xFF
+    header[10] = gist_bits & 0xFF
+    gist_room = 21 - 11
+    header[11: 11 + min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
 
     atoms = []
     for _ in range(HEADER_REDUNDANCY):
@@ -113,11 +119,17 @@ def pack_text_with_dict(
     header[1] = (K >> 8) & 0xFF
     header[2] = SYMBOL_SIZE & 0xFF
     header[3:7] = fountain_seed.to_bytes(4, "little")
+    if payload_len > 0xFFFFFF:
+        raise ValueError(
+            f"payload too large for ASTRAL header: {payload_len} bytes "
+            f"(max 16,777,215)"
+        )
     header[7] = payload_len & 0xFF
     header[8] = (payload_len >> 8) & 0xFF
-    header[9] = gist_bits & 0xFF
-    gist_room = 21 - 10
-    header[10: 10 + min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
+    header[9] = (payload_len >> 16) & 0xFF
+    header[10] = gist_bits & 0xFF
+    gist_room = 21 - 11
+    header[11: 11 + min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
     atoms = []
     atoms.append((0, HEADER_GIST, bytes(header)))
     # DICT_UPDATE atoms (insert right after header)
@@ -210,11 +222,17 @@ def _pack_with_custom_payload(
     header[1] = (K >> 8) & 0xFF
     header[2] = SYMBOL_SIZE & 0xFF
     header[3:7] = fountain_seed.to_bytes(4, "little")
+    if payload_len > 0xFFFFFF:
+        raise ValueError(
+            f"payload too large for ASTRAL header: {payload_len} bytes "
+            f"(max 16,777,215)"
+        )
     header[7] = payload_len & 0xFF
     header[8] = (payload_len >> 8) & 0xFF
-    header[9] = gist_bits & 0xFF
-    gist_room = 21 - 10
-    header[10:10 + min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
+    header[9] = (payload_len >> 16) & 0xFF
+    header[10] = gist_bits & 0xFF
+    gist_room = 21 - 11
+    header[11:11 + min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
     atoms = []
     for _ in range(HEADER_REDUNDANCY):
         atoms.append((len(atoms), HEADER_GIST, bytes(header)))
@@ -269,12 +287,16 @@ def unpack_stream(stream: bytes):
 
     K = header_atom[0] | (header_atom[1] << 8)
     symbol_size = header_atom[2]
-    payload_len = header_atom[7] | (header_atom[8] << 8)
-    gist_bits = header_atom[9]
-    gist_room = 21 - 10
+    payload_len = (
+        header_atom[7]
+        | (header_atom[8] << 8)
+        | (header_atom[9] << 16)
+    )
+    gist_bits = header_atom[10]
+    gist_room = 21 - 11
     # Calculate how many bytes the gist bits actually occupy
     gist_bytes_needed = (gist_bits + 7) // 8
-    gist_bytes = header_atom[10:10 + min(gist_bytes_needed, gist_room)]
+    gist_bytes = header_atom[11:11 + min(gist_bytes_needed, gist_room)]
 
     gist = parse_gist(gist_bytes, gist_bits)
 
