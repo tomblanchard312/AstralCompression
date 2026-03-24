@@ -8,7 +8,10 @@ HEADER_GIST = 0
 FOUNTAIN_PACKET = 1
 DICT_UPDATE = 2  # reserved
 
-def make_atom(atom_index, total_atoms, message_id, atom_type, payload21: bytes, version_flags=0x01) -> bytes:
+
+def make_atom(
+    atom_index, total_atoms, message_id, atom_type, payload21: bytes, version_flags=0x01
+) -> bytes:
     # Input validation
     if not isinstance(atom_index, int) or atom_index < 0 or atom_index > 65535:
         raise ValueError("atom_index must be 0-65535")
@@ -43,16 +46,17 @@ def parse_atoms(stream: bytes):
     # Input validation
     if not isinstance(stream, bytes):
         raise ValueError("stream must be bytes")
-    
+
     out = []
     for i in range(0, len(stream), ATOM_SIZE):
-        chunk = stream[i:i+ATOM_SIZE]
+        chunk = stream[i : i + ATOM_SIZE]
         if len(chunk) < ATOM_SIZE:
             break
         if chunk[0] != SYNC0 or chunk[1] != SYNC1:
             continue
         try:
             from .crc import crc8_j1850
+
             crc = crc8_j1850(chunk[:31])
             if (crc & 0xFF) != chunk[31]:
                 continue
@@ -61,7 +65,7 @@ def parse_atoms(stream: bytes):
             msg_id = chunk[7] | (chunk[8] << 8)
             typ = chunk[9]
             payload21 = bytes(chunk[10:31])
-            out.append( (idx, total, msg_id, typ, payload21) )
+            out.append((idx, total, msg_id, typ, payload21))
         except (IndexError, ValueError):
             # Skip malformed atoms
             continue

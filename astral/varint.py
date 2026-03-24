@@ -32,7 +32,7 @@ def leb128_decode(data: bytes, start: int = 0):
         raise TypeError("start must be a non-negative integer")
     if start >= len(data):
         raise ValueError("start position beyond data length")
-    
+
     shift = 0
     val = 0
     i = start

@@ -1,15 +1,75 @@
-import random
 import math
+
+
+class _Xorshift32:
+    """
+    Portable xorshift32 PRNG (Marsaglia 2003).
+    Identical output on every platform and language given the same seed.
+    Shift triple: 13, 17, 5.
+
+    Test vector: _Xorshift32(1).next_u32() == 270369
+    """
+
+    __slots__ = ("_state",)
+
+    def __init__(self, seed: int):
+        # Seed must be a non-zero 32-bit unsigned integer.
+        # Force into range and substitute 1 for the invalid seed of 0.
+        seed = int(seed) & 0xFFFFFFFF
+        self._state = seed if seed != 0 else 1
+
+    def next_u32(self) -> int:
+        """Return the next 32-bit unsigned integer."""
+        x = self._state
+        x ^= (x << 13) & 0xFFFFFFFF
+        x ^= (x >> 17)
+        x ^= (x << 5) & 0xFFFFFFFF
+        self._state = x & 0xFFFFFFFF
+        return self._state
+
+    def random(self) -> float:
+        """Return a float in [0.0, 1.0)."""
+        return self.next_u32() / 0x100000000
+
+    def getrandbits(self, k: int) -> int:
+        """Return a non-negative integer with k random bits (k <= 32)."""
+        if k <= 0:
+            return 0
+        if k > 32:
+            raise ValueError("_Xorshift32.getrandbits supports k <= 32 only")
+        return self.next_u32() >> (32 - k)
+
+    def sample_indices(self, n: int, k: int) -> list:
+        """
+        Return a list of k distinct indices chosen from range(n),
+        using a Fisher-Yates partial shuffle seeded from this RNG.
+        Equivalent to random.sample(range(n), k) but portable.
+        """
+        if k < 0 or k > n:
+            raise ValueError(
+                f"sample size {k} out of range for population {n}"
+            )
+        if k == 0:
+            return []
+
+        # Build a mutable pool and partial-shuffle the first k positions.
+        pool = list(range(n))
+        for i in range(k):
+            j = i + (self.next_u32() % (n - i))
+            pool[i], pool[j] = pool[j], pool[i]
+        return pool[:k]
+
 
 def _ideal_soliton(K):
     if K <= 0:
         raise ValueError("K must be positive")
-    
+
     p = [0.0] * (K + 1)
     p[1] = 1.0 / K
     for d in range(2, K + 1):
         p[d] = 1.0 / (d * (d - 1))
     return p
+
 
 def _robust_soliton(K, c=0.1, delta=0.05):
     if K <= 0:
@@ -18,15 +78,15 @@ def _robust_soliton(K, c=0.1, delta=0.05):
         raise ValueError("c must be positive")
     if delta <= 0 or delta >= 1:
         raise ValueError("delta must be in (0, 1)")
-    
+
     # More stable R calculation
     R = c * math.log(K / delta) * math.sqrt(K)
     p = _ideal_soliton(K)
     t = [0.0] * (K + 1)
-    
+
     # Calculate threshold more carefully
     K_over_R = max(1, int(K / max(R, 1)))
-    
+
     for d in range(1, K + 1):
         if d < K_over_R:
             t[d] = R / (d * K)
@@ -34,71 +94,83 @@ def _robust_soliton(K, c=0.1, delta=0.05):
             t[d] = (R * math.log(R / delta)) / K
         else:
             t[d] = 0.0
-    
+
     # Ensure normalization is stable
     Z = sum(p[1:]) + sum(t[1:])
     if Z <= 0:
         raise ValueError("Invalid distribution normalization")
-    
+
     return [(p[d] + t[d]) / Z for d in range(K + 1)]
+
 
 def _sample_degree(dist, rnd):
     if not dist or len(dist) < 2:
         raise ValueError("dist must have at least 2 elements")
-    
+
     r = rnd.random()
     cumulative = 0.0
-    
+
     for d in range(1, len(dist)):
         cumulative += dist[d]
         if r <= cumulative:
             return d
-    
+
     return len(dist) - 1
+
 
 def lt_encode_blocks(blocks, seed, num_packets, c=0.1, delta=0.05):
     if not blocks:
         raise ValueError("blocks cannot be empty")
     if num_packets <= 0:
         raise ValueError("num_packets must be positive")
-    
+
     K = len(blocks)
-    
-    # Handle single block case
+
+    # Handle single block case - pad to next power of 2
     if K == 1:
-        return [(seed, 1, blocks[0])] * num_packets
-    
+        block = blocks[0]
+        original_size = len(block)
+        if original_size == 0:
+            padded_size = 1
+        else:
+            # Pad to next power of 2
+            padded_size = 1 << (original_size - 1).bit_length()
+        if original_size < padded_size:
+            block = block + bytes(padded_size - original_size)
+        return [(seed, 1, block)] * num_packets
+
     # Validate block sizes
     block_size = len(blocks[0])
     if not all(len(block) == block_size for block in blocks):
         raise ValueError("All blocks must have the same size")
-    
-    rnd = random.Random(seed)
+
+    rnd = _Xorshift32(seed)
     dist = _robust_soliton(K, c, delta)
-    
+
     packets = []
     for _ in range(num_packets):
         # Generate deterministic packet seed
         packet_seed = rnd.getrandbits(32)
-        packet_rng = random.Random(packet_seed)
-        
+        packet_rng = _Xorshift32(packet_seed)
+
         # Sample degree
         degree = _sample_degree(dist, packet_rng)
         degree = max(1, min(degree, K))
-        
+
         # Use sampling without replacement for better distribution
-        indices = packet_rng.sample(range(K), degree)
-        
+        indices = packet_rng.sample_indices(K, degree)
+
         # XOR selected blocks
         encoded_block = bytearray(block_size)
         for idx in indices:
             block = blocks[idx]
             for j in range(block_size):
                 encoded_block[j] ^= block[j]
-        
+
         packets.append((packet_seed, degree, bytes(encoded_block)))
-    
+
     return packets
+
 
 def lt_decode_blocks(packets, K, symbol_size, c=0.1, delta=0.05):
     if not packets:
@@ -107,65 +179,57 @@ def lt_decode_blocks(packets, K, symbol_size, c=0.1, delta=0.05):
         raise ValueError("K must be positive")
     if symbol_size <= 0:
         raise ValueError("symbol_size must be positive")
-    
+
     # Reconstruct equations using same RNG sequence as encoder
     equations = []
     dist = _robust_soliton(K, c, delta)
-    
+
     for packet_seed, reported_degree, data in packets:
         if len(data) != symbol_size:
             continue  # Skip malformed packets
-        
+
         # Use same RNG sequence as encoder
-        packet_rng = random.Random(packet_seed)
-        
+        packet_rng = _Xorshift32(packet_seed)
+
         # Sample degree (must match encoder)
         degree = _sample_degree(dist, packet_rng)
         degree = max(1, min(degree, K))
-        
+
         # Get same indices as encoder
-        indices = packet_rng.sample(range(K), degree)
-        
+        indices = packet_rng.sample_indices(K, degree)
+
         equations.append((set(indices), bytearray(data)))
-    
+
     # Gaussian elimination
     solved = {}
-    
+
     while True:
         progress = False
-        
+
         # Find degree-1 equations
         for i, (indices, data) in enumerate(equations):
             if len(indices) == 1:
                 idx = next(iter(indices))
-                
                 if idx not in solved:
-                    # Skip if data is all zeros
-                    if all(b == 0 for b in data):
-                        continue
-                    
                     solved[idx] = bytes(data)
                     progress = True
-                    
-                    # Update all other equations
                     for j, (other_indices, other_data) in enumerate(equations):
                         if i != j and idx in other_indices:
                             other_indices.remove(idx)
-                            # XOR out the solved block
                             for k in range(len(other_data)):
                                 other_data[k] ^= data[k]
-        
+
         if not progress:
             break
-    
+
     # Prepare result
     decoded_blocks = [None] * K
     for idx, block in solved.items():
         if 0 <= idx < K:
             decoded_blocks[idx] = block
-    
+
     recovery_fraction = len(solved) / K
-    
+
     if recovery_fraction == 1.0:
         return decoded_blocks, 1.0
     else:

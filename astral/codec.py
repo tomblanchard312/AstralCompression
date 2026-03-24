@@ -1,18 +1,26 @@
-import math, random
-from .container import make_atom, parse_atoms, HEADER_GIST, FOUNTAIN_PACKET
-from .grammar import make_gist_bits, encode_payload, decode_payload, parse_gist
+import os
+from .container import make_atom, parse_atoms
+from .container import HEADER_GIST, FOUNTAIN_PACKET
+from .grammar import make_gist_bits, encode_payload, decode_payload
+from .grammar import parse_gist
 from .textpack import encode_text, decode_text
-from .commands import encode_cmd, decode_cmd, encode_cmd_batch, decode_cmd_batch
+from .commands import (
+    encode_cmd,
+    decode_cmd,
+    encode_cmd_batch,
+    decode_cmd_batch,
+)
 from .voice import encode_wav_to_bitstream
 from .dict_update import split_words_from_atoms, make_dict_update_atoms
 from .fountain import lt_encode_blocks, lt_decode_blocks
 
 SYMBOL_SIZE = 16  # bytes per source block for the fountain code
 
+
 def chunk_blocks(payload: bytes, symbol_size: int):
     blocks = []
     for i in range(0, len(payload), symbol_size):
-        chunk = payload[i:i+symbol_size]
+        chunk = payload[i:i + symbol_size]
         if len(chunk) < symbol_size:
             chunk = chunk + bytes(symbol_size - len(chunk))
         blocks.append(chunk)
@@ -20,7 +28,10 @@ def chunk_blocks(payload: bytes, symbol_size: int):
         blocks.append(bytes(symbol_size))
     return blocks
 
-def pack_message(msg: dict, message_id: int = None, extra_fountain=0):
+
+def pack_message(
+    msg: dict, message_id: int | None = None, extra_fountain=0
+):
     # Input validation
     if not isinstance(msg, dict):
         raise ValueError("msg must be a dictionary")
@@ -28,21 +39,17 @@ def pack_message(msg: dict, message_id: int = None, extra_fountain=0):
         raise ValueError("msg must contain 'type' field")
     if extra_fountain < 0:
         raise ValueError("extra_fountain must be non-negative")
-    
+
     if message_id is None:
-        message_id = random.randint(1, 0xFFFF)
+        message_id = (int.from_bytes(os.urandom(2), "little") or 1)
 
     # 1) Build gist and payload
     gist_bytes, gist_bits = make_gist_bits(msg)
     payload = encode_payload(msg)
     payload_len = len(payload)
-
-    # 2) Build fountain source blocks
     blocks = chunk_blocks(payload, SYMBOL_SIZE)
     K = len(blocks)
-
-    # 3) Header payload (21 bytes)
-    fountain_seed = random.getrandbits(32)
+    fountain_seed = int.from_bytes(os.urandom(4), "little") or 1
     header = bytearray(21)
     header[0] = K & 0xFF
     header[1] = (K >> 8) & 0xFF
@@ -52,59 +59,73 @@ def pack_message(msg: dict, message_id: int = None, extra_fountain=0):
     header[8] = (payload_len >> 8) & 0xFF
     header[9] = gist_bits & 0xFF
     gist_room = 21 - 10
-    header[10:10+min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
+    header[10: 10 + min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
 
     atoms = []
-    atoms.append( (0, HEADER_GIST, bytes(header)) )
+    atoms.append((0, HEADER_GIST, bytes(header)))
 
-    # 4) Fountain packets
-    M = K + max(10, K) + int(extra_fountain)  # Increased redundancy for better recovery
-    packets = lt_encode_blocks(blocks, seed=fountain_seed, num_packets=M)
-    for i,(seed, degree, block) in enumerate(packets, start=1):
+    # 4) Fountain packets - Increased redundancy for better recovery
+    M = K + max(10, K) + int(extra_fountain)
+    packets = lt_encode_blocks(
+        blocks, seed=fountain_seed, num_packets=M
+    )
+    for i, (seed, degree, block) in enumerate(packets, start=1):
         p = bytearray(21)
         p[0:4] = seed.to_bytes(4, "little")
         p[4] = degree & 0xFF
         p[5:21] = block[:16]
-        atoms.append( (i, FOUNTAIN_PACKET, bytes(p)) )
+        atoms.append((i, FOUNTAIN_PACKET, bytes(p)))
 
     total_atoms = len(atoms)
     out = bytearray()
-    for (idx, typ, payload21) in atoms:
+    for idx, typ, payload21 in atoms:
         out += make_atom(idx, total_atoms, message_id, typ, payload21)
     return bytes(out)
-    
-def pack_text_with_dict(words: list[str], text: str, extra_fountain=0, message_id=None):
-    import random
+
+
+def pack_text_with_dict(
+    words: list[str],
+    text: str,
+    extra_fountain=0,
+    message_id: int | None = None,
+):
     if message_id is None:
-        message_id = random.randint(1, 0xFFFF)
+        message_id = (int.from_bytes(os.urandom(2), "little") or 1)
     # 1) send dict update atoms
-    msgmeta = {"type":"TEXT", "conf":0.99}
+    msgmeta = {"type": "TEXT", "conf": 0.99}
     gist_bytes, gist_bits = make_gist_bits(msgmeta)
-    # header with zero payload_len for now; we will follow with fountain payload atoms
+    # header with zero payload_len; follow with fountain payload atoms
     payload = encode_text(text)
     payload_len = len(payload)
     blocks = chunk_blocks(payload, SYMBOL_SIZE)
     K = len(blocks)
-    fountain_seed = random.getrandbits(32)
+    fountain_seed = int.from_bytes(os.urandom(4), "little") or 1
     header = bytearray(21)
-    header[0] = K & 0xFF; header[1] = (K >> 8) & 0xFF
+    header[0] = K & 0xFF
+    header[1] = (K >> 8) & 0xFF
     header[2] = SYMBOL_SIZE & 0xFF
-    header[3:7] = fountain_seed.to_bytes(4, 'little')
-    header[7] = payload_len & 0xFF; header[8] = (payload_len >> 8) & 0xFF
+    header[3:7] = fountain_seed.to_bytes(4, "little")
+    header[7] = payload_len & 0xFF
+    header[8] = (payload_len >> 8) & 0xFF
     header[9] = gist_bits & 0xFF
     gist_room = 21 - 10
-    header[10:10+min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
+    header[10: 10 + min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
     atoms = []
-    atoms.append( (0, HEADER_GIST, bytes(header)) )
+    atoms.append((0, HEADER_GIST, bytes(header)))
     # DICT_UPDATE atoms (insert right after header)
     for dp in make_dict_update_atoms(words):
-        atoms.append( (len(atoms), 2, dp) )
-    M = K + max(10, K) + int(extra_fountain)  # Increased redundancy for better recovery
-    packets = lt_encode_blocks(blocks, seed=fountain_seed, num_packets=M)
-    for i,(seed, degree, block) in enumerate(packets, start=len(atoms)):
+        atoms.append((len(atoms), 2, dp))
+    # Increased redundancy for better recovery
+    M = K + max(10, K) + int(extra_fountain)
+    packets = lt_encode_blocks(
+        blocks, seed=fountain_seed, num_packets=M
+    )
+    for i, (seed, degree, block) in enumerate(packets, start=len(atoms)):
         p = bytearray(21)
-        p[0:4] = seed.to_bytes(4, 'little'); p[4] = degree & 0xFF; p[5:21] = block[:16]
-        atoms.append( (i, FOUNTAIN_PACKET, bytes(p)) )
+        p[0:4] = seed.to_bytes(4, "little")
+        p[4] = degree & 0xFF
+        p[5:21] = block[:16]
+        atoms.append((i, FOUNTAIN_PACKET, bytes(p)))
     total_atoms = len(atoms)
     out = bytearray()
     # reindex atoms sequentially from 0..N-1 with correct total
@@ -112,41 +133,70 @@ def pack_text_with_dict(words: list[str], text: str, extra_fountain=0, message_i
         out += make_atom(new_idx, total_atoms, message_id, typ, payload21)
     return bytes(out)
 
-def pack_text_message(text: str, extra_fountain=0, message_id=None):
+
+def pack_text_message(
+    text: str, extra_fountain=0, message_id: int | None = None
+):
     # Input validation
     if not isinstance(text, str):
         raise ValueError("text must be a string")
     if extra_fountain < 0:
         raise ValueError("extra_fountain must be non-negative")
-    
-    msg = {"type":"TEXT", "conf":0.99}
-    return _pack_with_custom_payload(msg, encode_text(text), extra_fountain, message_id)
 
-def pack_cmd_message(cmd: dict, extra_fountain=0, message_id=None, key: bytes=None):
+    msg = {"type": "TEXT", "conf": 0.99}
+    return _pack_with_custom_payload(
+        msg, encode_text(text), extra_fountain, message_id
+    )
+
+
+def pack_cmd_message(
+    cmd: dict,
+    extra_fountain=0,
+    message_id: int | None = None,
+    key: bytes | None = None,
+):
     payload = encode_cmd(cmd, key=key)
-    msg = {"type":"CMD", "conf":0.99}
-    return _pack_with_custom_payload(msg, payload, extra_fountain, message_id)
+    msg = {"type": "CMD", "conf": 0.99}
+    return _pack_with_custom_payload(
+        msg, payload, extra_fountain, message_id
+    )
 
-def pack_voice_message(wav_path: str, extra_fountain=0, message_id=None):
+
+def pack_voice_message(
+    wav_path: str,
+    extra_fountain=0,
+    message_id: int | None = None,
+):
     payload = encode_wav_to_bitstream(wav_path)
-    msg = {"type":"VOICE", "conf":0.9}
-    return _pack_with_custom_payload(msg, payload, extra_fountain, message_id)
+    msg = {"type": "VOICE", "conf": 0.9}
+    return _pack_with_custom_payload(
+        msg, payload, extra_fountain, message_id
+    )
 
 
-def pack_cmd_batch(batch: dict, extra_fountain=0, message_id=None, key: bytes=None):
+def pack_cmd_batch(
+    batch: dict,
+    extra_fountain=0,
+    message_id: int | None = None,
+    key: bytes | None = None,
+):
     payload = encode_cmd_batch(batch, key=key)
-    msg = {"type":"CMD_BATCH", "conf":0.99}
-    return _pack_with_custom_payload(msg, payload, extra_fountain, message_id)
+    msg = {"type": "CMD_BATCH", "conf": 0.99}
+    return _pack_with_custom_payload(
+        msg, payload, extra_fountain, message_id
+    )
 
-def _pack_with_custom_payload(msgmeta: dict, payload: bytes, extra_fountain=0, message_id=None):
-    import random
+
+def _pack_with_custom_payload(
+    msgmeta: dict, payload: bytes, extra_fountain=0, message_id=None
+):
     if message_id is None:
-        message_id = random.randint(1, 0xFFFF)
+        message_id = (int.from_bytes(os.urandom(2), "little") or 1)
     gist_bytes, gist_bits = make_gist_bits(msgmeta)
     payload_len = len(payload)
     blocks = chunk_blocks(payload, SYMBOL_SIZE)
     K = len(blocks)
-    fountain_seed = random.getrandbits(32)
+    fountain_seed = int.from_bytes(os.urandom(4), "little") or 1
     header = bytearray(21)
     header[0] = K & 0xFF
     header[1] = (K >> 8) & 0xFF
@@ -156,21 +206,25 @@ def _pack_with_custom_payload(msgmeta: dict, payload: bytes, extra_fountain=0, m
     header[8] = (payload_len >> 8) & 0xFF
     header[9] = gist_bits & 0xFF
     gist_room = 21 - 10
-    header[10:10+min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
+    header[10:10 + min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
     atoms = []
-    atoms.append( (0, HEADER_GIST, bytes(header)) )
-    M = K + max(10, K) + int(extra_fountain)  # Increased redundancy for better recovery
-    packets = lt_encode_blocks(blocks, seed=fountain_seed, num_packets=M)
-    for i,(seed, degree, block) in enumerate(packets, start=1):
+    atoms.append((0, HEADER_GIST, bytes(header)))
+    M = K + max(10, K) + int(extra_fountain)
+    packets = lt_encode_blocks(
+        blocks, seed=fountain_seed, num_packets=M
+    )
+    for i, (seed, degree, block) in enumerate(packets, start=1):
         p = bytearray(21)
         p[0:4] = seed.to_bytes(4, "little")
         p[4] = degree & 0xFF
         p[5:21] = block[:16]
-        atoms.append( (i, FOUNTAIN_PACKET, bytes(p)) )
+        atoms.append((i, FOUNTAIN_PACKET, bytes(p)))
     total_atoms = len(atoms)
     out = bytearray()
-    for (idx, typ, payload21) in atoms:
-        out += make_atom(idx, total_atoms, message_id, typ, payload21)
+    for idx, typ, payload21 in atoms:
+        out += make_atom(
+            idx, total_atoms, message_id, typ, payload21
+        )
     return bytes(out)
 
 
@@ -180,7 +234,7 @@ def unpack_stream(stream: bytes):
         raise ValueError("stream must be bytes")
     if len(stream) == 0:
         return {"error": "empty stream"}
-    
+
     atoms = parse_atoms(stream)
     if not atoms:
         return {"error": "no valid atoms"}
@@ -190,7 +244,7 @@ def unpack_stream(stream: bytes):
     fountain_atoms = []
     dict_atoms = []
     total_atoms = atoms[0][1]
-    for (idx,total,mid,typ,payload) in atoms:
+    for idx, total, mid, typ, payload in atoms:
         if mid != msg_id:
             continue
         total_atoms = total
@@ -202,17 +256,16 @@ def unpack_stream(stream: bytes):
             dict_atoms.append(payload)
 
     if header_atom is None:
-        return {"error":"missing header/gist atom"}
+        return {"error": "missing header/gist atom"}
 
     K = header_atom[0] | (header_atom[1] << 8)
     symbol_size = header_atom[2]
-    fountain_seed = int.from_bytes(header_atom[3:7], "little")
     payload_len = header_atom[7] | (header_atom[8] << 8)
     gist_bits = header_atom[9]
     gist_room = 21 - 10
     # Calculate how many bytes the gist bits actually occupy
     gist_bytes_needed = (gist_bits + 7) // 8
-    gist_bytes = header_atom[10:10+min(gist_bytes_needed, gist_room)]
+    gist_bytes = header_atom[10:10 + min(gist_bytes_needed, gist_room)]
 
     gist = parse_gist(gist_bytes, gist_bits)
 
@@ -221,7 +274,7 @@ def unpack_stream(stream: bytes):
         seed = int.from_bytes(p[0:4], "little")
         degree = p[4]
         block = bytes(p[5:21])
-        packets.append( (seed, degree, block) )
+        packets.append((seed, degree, block))
 
     complete = False
     recovered_fraction = 0.0
@@ -233,22 +286,28 @@ def unpack_stream(stream: bytes):
         if recovered is not None:
             payload = b"".join(recovered)[:payload_len]
             try:
-                mtype = gist.get('type')
+                mtype = gist.get("type")
                 if dict_atoms:
                     extra_words = split_words_from_atoms(dict_atoms)
                 else:
                     extra_words = []
-                if mtype == 'TEXT':
+                if mtype == "TEXT":
                     if extra_words:
-                        message = { 'type':'TEXT', 'text': decode_text(payload), 'extra_words': extra_words }
+                        message = {
+                            "type": "TEXT",
+                            "text": decode_text(payload),
+                            "extra_words": extra_words,
+                        }
                     else:
-                        message = { 'type':'TEXT', 'text': decode_text(payload) }
-                elif mtype == 'VOICE':
-                    message = { 'type':'VOICE', 'bytes': payload }
-                elif mtype == 'CMD':
-                    message = { 'type':'CMD', 'cmd': decode_cmd(payload) }
-                elif mtype == 'CMD_BATCH':
-                    message = { 'type':'CMD_BATCH', 'batch': decode_cmd_batch(payload) }
+                        message = {"type": "TEXT",
+                                   "text": decode_text(payload)}
+                elif mtype == "VOICE":
+                    message = {"type": "VOICE", "bytes": payload}
+                elif mtype == "CMD":
+                    message = {"type": "CMD", "cmd": decode_cmd(payload)}
+                elif mtype == "CMD_BATCH":
+                    message = {"type": "CMD_BATCH",
+                               "batch": decode_cmd_batch(payload)}
                 else:
                     message = decode_payload(payload)
                 complete = True
@@ -263,5 +322,5 @@ def unpack_stream(stream: bytes):
         "gist": gist,
         "complete": complete,
         "recovered_fraction": recovered_fraction,
-        "message": message
+        "message": message,
     }

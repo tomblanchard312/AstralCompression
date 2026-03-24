@@ -24,15 +24,15 @@ class BitWriter:
         # Input validation
         if not isinstance(b, bytes):
             raise TypeError("b must be bytes")
-        
+
         self.align_byte()
         self.out.extend(b)
 
     def align_byte(self):
         if self.nbits > 0:
             self.out.append(self.buf & 0xFF)
-            self.buf = 0
-            self.nbits = 0
+        self.buf = 0
+        self.nbits = 0
 
     def getvalue(self) -> bytes:
         try:
@@ -47,7 +47,7 @@ class BitReader:
         # Input validation
         if not isinstance(data, bytes):
             raise TypeError("data must be bytes")
-        
+
         self.data = data
         self.pos = 0
         self.buf = 0
@@ -57,7 +57,7 @@ class BitReader:
         # Input validation
         if not isinstance(n, int) or n < 0:
             raise TypeError("n must be a non-negative integer")
-        
+
         while self.nbits < n:
             if self.pos >= len(self.data):
                 raise EOFError("not enough bits")
@@ -73,18 +73,16 @@ class BitReader:
         # Input validation
         if not isinstance(n, int) or n < 0:
             raise TypeError("n must be a non-negative integer")
-        
+
         self.align_byte()
         if self.pos + n > len(self.data):
             raise EOFError("not enough bytes")
-        b = self.data[self.pos:self.pos+n]
+        b = self.data[self.pos:self.pos + n]
         self.pos += n
         return b
 
     def align_byte(self):
-        # Don't lose remaining bits - just ensure we're at byte boundary
         if self.nbits > 0:
-            # Advance to next byte boundary
-            self.pos += 1
+            self.pos += 1  # only advance if there are unconsumed buffered bits
         self.buf = 0
         self.nbits = 0
