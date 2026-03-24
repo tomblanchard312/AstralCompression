@@ -9,6 +9,8 @@ Nothing about the ASTRAL codec, fountain code, or atom format is changed;
 this is purely a framing layer.
 """
 
+from __future__ import annotations
+
 import struct
 
 # APID assignments: (APID, packet_type) where packet_type 0=TM, 1=TC

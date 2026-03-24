@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import struct
 
 from .crc import crc16_ccitt

@@ -1,6 +1,8 @@
 # Compact satellite command encoding with optional HMAC authentication.
 # Uses stdlib only.
 
+from __future__ import annotations
+
 import hmac
 import hashlib
 from .bitstream import BitWriter
