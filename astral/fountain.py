@@ -126,17 +126,12 @@ def lt_encode_blocks(blocks, seed, num_packets, c=0.1, delta=0.05):
 
     K = len(blocks)
 
-    # Handle single block case - pad to next power of 2
+    # Handle single block case.
     if K == 1:
         block = blocks[0]
-        original_size = len(block)
-        if original_size == 0:
-            padded_size = 1
-        else:
-            # Pad to next power of 2
-            padded_size = 1 << (original_size - 1).bit_length()
-        if original_size < padded_size:
-            block = block + bytes(padded_size - original_size)
+        block_size = len(blocks[0])
+        if len(block) < block_size:
+            block = block + bytes(block_size - len(block))
         return [(seed, 1, block)] * num_packets
 
     # Validate block sizes

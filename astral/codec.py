@@ -19,6 +19,7 @@ from .dict_update import split_words_from_atoms, make_dict_update_atoms
 from .fountain import lt_encode_blocks, lt_decode_blocks
 
 SYMBOL_SIZE = 16  # bytes per source block for the fountain code
+HEADER_REDUNDANCY = 4  # replicate header atoms to reduce header-loss failures
 
 
 def chunk_blocks(payload: bytes, symbol_size: int):
@@ -66,14 +67,15 @@ def pack_message(
     header[10: 10 + min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
 
     atoms = []
-    atoms.append((0, HEADER_GIST, bytes(header)))
+    for _ in range(HEADER_REDUNDANCY):
+        atoms.append((len(atoms), HEADER_GIST, bytes(header)))
 
     # 4) Fountain packets - Increased redundancy for better recovery
     M = K + max(10, K) + int(extra_fountain)
     packets = lt_encode_blocks(
         blocks, seed=fountain_seed, num_packets=M
     )
-    for i, (seed, degree, block) in enumerate(packets, start=1):
+    for i, (seed, degree, block) in enumerate(packets, start=len(atoms)):
         p = bytearray(21)
         p[0:4] = seed.to_bytes(4, "little")
         p[4] = degree & 0xFF
@@ -212,12 +214,13 @@ def _pack_with_custom_payload(
     gist_room = 21 - 10
     header[10:10 + min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
     atoms = []
-    atoms.append((0, HEADER_GIST, bytes(header)))
+    for _ in range(HEADER_REDUNDANCY):
+        atoms.append((len(atoms), HEADER_GIST, bytes(header)))
     M = K + max(10, K) + int(extra_fountain)
     packets = lt_encode_blocks(
         blocks, seed=fountain_seed, num_packets=M
     )
-    for i, (seed, degree, block) in enumerate(packets, start=1):
+    for i, (seed, degree, block) in enumerate(packets, start=len(atoms)):
         p = bytearray(21)
         p[0:4] = seed.to_bytes(4, "little")
         p[4] = degree & 0xFF

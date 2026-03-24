@@ -1,0 +1,15 @@
+{
+  "typeCheckingMode": "basic",
+  "pythonVersion": "3.9",
+  "reportMissingImports": true,
+  "reportUndefinedVariable": true,
+  "reportReturnType": true,
+  "reportArgumentType": true,
+  "reportAttributeAccessIssue": true,
+  "exclude": [
+    "astral/mckay_astral_integration.py",
+    "astral/mckay_usage_example.py",
+    "test_mckay_*.py",
+    "mckay_comprehensive_test.py"
+  ]
+}

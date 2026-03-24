@@ -160,17 +160,14 @@ def decode_text(b: bytes) -> str:
         else:
             break
 
-    # Improved token joining
+    # Insert a space before every non-first alphanumeric token.
     out = []
     for i, t in enumerate(toks):
         if i == 0:
             out.append(t)
+        elif t and t[0].isalnum():
+            out.append(" " + t)
         else:
-            prev_alnum = toks[i - 1] and toks[i - 1][-1].isalnum()
-            curr_alnum = t and t[0].isalnum()
-            if prev_alnum and curr_alnum:
-                out.append(" " + t)
-            else:
-                out.append(t)
+            out.append(t)
 
     return "".join(out)

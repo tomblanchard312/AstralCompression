@@ -4,9 +4,28 @@ build-backend = "setuptools.backends.legacy:build"
 
 [project]
 name = "astral-compression"
-version = "0.4.0"
+version = "0.6.0"
+description = "Extreme compression and loss-tolerant messaging for deep-space RF links"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "Tom Blanchard", email = "tomblanchard312@users.noreply.github.com" }
+]
 requires-python = ">=3.9"
-dependencies = ["reedsolo>=1.7"]
+dependencies = [
+    "reedsolo>=1.7",
+]
+
+[project.urls]
+Homepage = "https://github.com/tomblanchard312/AstralCompression"
+Repository = "https://github.com/tomblanchard312/AstralCompression"
 
 [project.scripts]
 astral = "astral.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
