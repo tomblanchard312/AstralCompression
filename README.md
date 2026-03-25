@@ -11,13 +11,13 @@ message delivery across deep‑space links. ASTRAL focuses on:
 > This is a *starter* reference implementation to experiment with ideas.
 > It aims to be simple to read and hack on rather than fully optimized.
 
-## 📚 Repository
+## Repository
 
 **GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
 
 **License**: MIT License with Attribution Requirement - See [LICENSE](LICENSE) for details.
 
-## 🚀 Dr. Rodney McKay's Extreme Compression System
+## Dr. Rodney McKay's Extreme Compression System
 
 ![Dr. Rodney McKay](https://upload.wikimedia.org/wikipedia/en/f/f9/RodneyMcKaypic.jpg)
 
@@ -25,7 +25,7 @@ ASTRAL now includes **Dr. Rodney McKay's revolutionary extreme compression algor
 
 > **Inspired by**: [Atlantis Data Burst](https://www.gateworld.net/wiki/Atlantis_data_burst) - Dr. McKay's fictional but scientifically-grounded approach to extreme data compression for long-distance space transmission. This implementation brings that concept to reality with modern compression algorithms and fountain codes.
 
-### 🇨🇦 McKay Compression Features:
+### McKay Compression Features:
 - **Text**: Semantic encoding with space mission vocabulary optimization
 - **Binary**: Pattern recognition and structured data compression
 - **Images**: Visual pattern analysis and metadata optimization  
@@ -33,25 +33,25 @@ ASTRAL now includes **Dr. Rodney McKay's revolutionary extreme compression algor
 - **Fountain Code Integration**: Reliable transmission even with 20% packet loss
 
 ### Current Implementation Status:
-- **Text + McKay + Fountain**: ✅ **100% Working** (3.125x compression)
-- **Binary + McKay + Fountain**: ✅ **100% Working** (up to 180x compression)
-- **Images + McKay + Fountain**: ✅ **100% Working** (2.84x compression)
-- **Voice + McKay + Fountain**: ✅ **100% Working** (GIST-first atomized packets)
-- **GIST-First Architecture**: ✅ **100% Operational** (essential metadata survives packet loss)
-- **Atomized Packets**: ✅ **100% Operational** (32-byte atoms with CRC-8 integrity)
+- **Text + McKay + Fountain**: **100% Working** (3.125x compression)
+- **Binary + McKay + Fountain**: **100% Working** (up to 180x compression)
+- **Images + McKay + Fountain**: **100% Working** (2.84x compression)
+- **Voice + McKay + Fountain**: **100% Working** (GIST-first atomized packets)
+- **GIST-First Architecture**: **100% Operational** (essential metadata survives packet loss)
+- **Atomized Packets**: **100% Operational** (32-byte atoms with CRC-8 integrity)
 
 ### Compression Ratios Achieved:
-- **Telemetry Data**: Up to 180x compression! 🚀
-- **Image Patterns**: 64x compression 🖼️
-- **Random Binary**: 27x compression 🔧
-- **Text Messages**: 3x compression with semantic preservation 📝
+- **Telemetry Data**: Up to 180x compression!
+- **Image Patterns**: 64x compression
+- **Random Binary**: 27x compression
+- **Text Messages**: 3x compression with semantic preservation
 
 ## Quick start
 
-### 🇨🇦 McKay + ASTRAL System
-- **📖 Full Integration Guide**: [MCKAY_ASTRAL_INTEGRATION.md](MCKAY_ASTRAL_INTEGRATION.md)
-- **🚀 Quick Reference**: [QUICK_REFERENCE.md](QUICK_REFERENCE.md)
-- **✅ Use the core CLI**: `python -m astral.cli --help`
+### McKay + ASTRAL System
+- **Full Integration Guide**: [MCKAY_ASTRAL_INTEGRATION.md](MCKAY_ASTRAL_INTEGRATION.md)
+- **Quick Reference**: [QUICK_REFERENCE.md](QUICK_REFERENCE.md)
+- **Use the core CLI**: `python -m astral.cli --help`
 
 ### Basic ASTRAL Operations
 ```bash
@@ -65,7 +65,7 @@ python -m astral.cli simulate out.bin lossy.bin --drop 0.4
 python -m astral.cli unpack lossy.bin
 ```
 
-### 🇨🇦 McKay + ASTRAL GIST-First System
+### McKay + ASTRAL GIST-First System
 Use the maintained `astral.cli` commands shown above for packaging,
 loss simulation, and decoding workflows.
 
@@ -102,7 +102,7 @@ python -m pytest tests
 - The **payload** (grammar‑coded) is split into `K` source blocks of 16 bytes (last padded with zeros).
 - We emit M≥K fountain packets (default equals total_atoms−1). Each packet includes: seed, degree, and XORed block.
 
-## 🚀 GIST-First Architecture: Deep Space Transmission Redefined
+## GIST-First Architecture: Deep Space Transmission Redefined
 
 ### What Makes ASTRAL Revolutionary:
 - **GIST-First Progressive Decoding**: Essential metadata survives even under severe packet loss
@@ -187,16 +187,16 @@ python -m astral.cli unpack out_batch.bin
 ```
 
 ## Current Project Status
-- **Core ASTRAL**: ✅ Fully functional with TEXT, VOICE, CMD, and DICT_UPDATE support
-- **🇨🇦 McKay Integration**: ✅ **100% OPERATIONAL** with GIST-first atomized packets
-- **GIST-First Architecture**: ✅ **100% OPERATIONAL** (essential metadata survives packet loss)
-- **Atomized Packets**: ✅ **100% OPERATIONAL** (32-byte atoms with CRC-8 integrity)
-- **Fountain Codes**: ✅ **100% OPERATIONAL** with optimized parameters for all data types
-- **Deep Space Ready**: ✅ **FULLY OPERATIONAL** for all data types! 🚀
+- **Core ASTRAL**: Fully functional with TEXT, VOICE, CMD, and DICT_UPDATE support
+- **McKay Integration**: **100% OPERATIONAL** with GIST-first atomized packets
+- **GIST-First Architecture**: **100% OPERATIONAL** (essential metadata survives packet loss)
+- **Atomized Packets**: **100% OPERATIONAL** (32-byte atoms with CRC-8 integrity)
+- **Fountain Codes**: **100% OPERATIONAL** with optimized parameters for all data types
+- **Deep Space Ready**: **FULLY OPERATIONAL** for all data types!
 
 ---
 
-## 📚 Repository & License
+## Repository & License
 
 **GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
 

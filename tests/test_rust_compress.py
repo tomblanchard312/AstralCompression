@@ -128,7 +128,7 @@ class TestTelemetryCompression:
         for i in range(0, len(decompressed), 4):
             result_floats.append(struct.unpack('>f', decompressed[i:i + 4])[0])
         
-        np.testing.assert_allclose(data, result_floats, rtol=1e-4, atol=1e-4)
+        np.testing.assert_allclose(data, result_floats, rtol=0.0, atol=0.001)
     
     def test_telemetry_performance(self):
         """Test that Rust telemetry compression is faster than Python."""

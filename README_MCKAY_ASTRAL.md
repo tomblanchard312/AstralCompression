@@ -1,18 +1,18 @@
-# 🚀 McKay + ASTRAL Deep Space Compression System
+# McKay + ASTRAL Deep Space Compression System
 
 **Dr. Rodney McKay's extreme compression integrated with ASTRAL fountain codes for deep space communication.**
 
-## 🌟 Overview
+## Overview
 
 This system combines **McKay's extreme compression algorithms** with your existing **ASTRAL fountain codes** to achieve compression ratios of **2-100x** (depending on data type). Perfect for deep space missions where bandwidth is limited and data integrity is critical.
 
-## 📚 Repository
+## Repository
 
 **GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
 
 **License**: MIT License with Attribution Requirement - See [LICENSE](LICENSE) for details.
 
-## 🎯 Key Features
+## Key Features
 
 - **McKay's Semantic Compression**: Understands space mission vocabulary and patterns
 - **LZMA Integration**: Uses 7-Zip's algorithm for maximum compression
@@ -20,16 +20,16 @@ This system combines **McKay's extreme compression algorithms** with your existi
 - **Multi-Data Support**: Text, voice, binary, and image compression
 - **Deep Space Optimized**: Designed for extreme compression in harsh conditions
 
-## 📊 Compression Performance
+## Compression Performance
 
 | Data Type | Typical Compression | McKay Rating | Use Case |
 |-----------|---------------------|--------------|----------|
-| **Binary Data** | **10-20x** | ✅ Very Good | Scientific measurements, telemetry |
-| **Repetitive Text** | **20-50x** | ⭐ Excellent | Mission reports, status updates |
-| **Voice Data** | **5-15x** | 👍 Good | Communication, audio logs |
-| **Mission Data** | **2-10x** | ⚠️ Acceptable | Unique communications |
+| **Binary Data** | **10-20x** | Very Good | Scientific measurements, telemetry |
+| **Repetitive Text** | **20-50x** | Excellent | Mission reports, status updates |
+| **Voice Data** | **5-15x** | Good | Communication, audio logs |
+| **Mission Data** | **2-10x** | Acceptable | Unique communications |
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Basic Usage
 

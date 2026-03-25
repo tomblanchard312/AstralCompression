@@ -1,3 +1,7 @@
+# Rust / Cargo build artifacts
+astral_compress/target/
+astral_compress/Cargo.lock
+
 # 🇨🇦 McKay + ASTRAL Project .gitignore
 
 # Python

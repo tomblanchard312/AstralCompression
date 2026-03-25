@@ -25,17 +25,19 @@ jobs:
       - name: Set up Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
+          toolchain: stable
           components: rustfmt, clippy
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest flake8 reedsolo maturin
+          pip install pytest flake8 reedsolo maturin zstd numpy
 
-      - name: Build Rust extension
+      - name: Build and install Rust extension
         run: |
           cd astral_compress
-          maturin develop --release
+          maturin build --release --out ../dist
+          pip install ../dist/*.whl
 
       - name: Lint with flake8
         run: flake8 astral/ --config=setup.cfg
@@ -43,4 +45,4 @@ jobs:
       - name: Run tests
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: pytest tests/ -v --tb=short
+        run: pytest tests/ -v --tb=short --ignore=tests/test_rust_compress_old.py

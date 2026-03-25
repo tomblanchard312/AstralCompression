@@ -64,7 +64,7 @@ fn compress_telemetry(py: Python, data: &[u8], channels: usize) -> PyResult<Py<P
         if n_samples > 1 {
             for i in 1..n_samples {
                 let delta = q_vals[i] as i32 - q_vals[i-1] as i32;
-                let delta = delta.max(-2048).min(2047) as i16;
+                let delta = delta as i16;  // Q12 deltas fit i16: max ±4095 < ±32767
                 deltas.extend_from_slice(&delta.to_be_bytes());
             }
         }
@@ -79,7 +79,7 @@ fn compress_telemetry(py: Python, data: &[u8], channels: usize) -> PyResult<Py<P
     let compressed = zstd::encode_all(&payload[..], 9)
         .map_err(|e| PyValueError::new_err(format!("zstd compression failed: {}", e)))?;
     
-    Ok(PyBytes::new_bound(py, &compressed).unbind())
+    Ok(PyBytes::new(py, &compressed).unbind())
 }
 
 /// Decompress telemetry data from zstd-compressed Q12 quantized format
@@ -149,7 +149,7 @@ fn decompress_telemetry(py: Python, payload_bytes: &[u8], original_length: usize
         }
     }
     
-    Ok(PyBytes::new_bound(py, &out).unbind())
+    Ok(PyBytes::new(py, &out).unbind())
 }
 
 /// Compress binary float data by reordering bytes and using zstd compression
@@ -182,7 +182,7 @@ fn compress_binary_float(py: Python, data: &[u8]) -> PyResult<Py<PyBytes>> {
     let compressed = zstd::encode_all(&reordered[..], 9)
         .map_err(|e| PyValueError::new_err(format!("zstd compression failed: {}", e)))?;
     
-    Ok(PyBytes::new_bound(py, &compressed).unbind())
+    Ok(PyBytes::new(py, &compressed).unbind())
 }
 
 /// Decompress binary float data from zstd-compressed reordered format
@@ -210,7 +210,7 @@ fn decompress_binary_float(py: Python, payload_bytes: &[u8], original_length: us
         out[i*4 + 3] = reordered[3*n + i];
     }
     
-    Ok(PyBytes::new_bound(py, &out).unbind())
+    Ok(PyBytes::new(py, &out).unbind())
 }
 
 /// Compress text data using abbreviation encoding and zstd compression
@@ -277,7 +277,7 @@ fn compress_text(py: Python, data: &[u8]) -> PyResult<Py<PyBytes>> {
     let compressed = zstd::encode_all(abbr_bytes, 9)
         .map_err(|e| PyValueError::new_err(format!("zstd compression failed: {}", e)))?;
     
-    Ok(PyBytes::new_bound(py, &compressed).unbind())
+    Ok(PyBytes::new(py, &compressed).unbind())
 }
 
 /// Decompress text data from zstd-compressed abbreviated format
@@ -358,7 +358,7 @@ fn decompress_text(py: Python, data: &[u8]) -> PyResult<Py<PyBytes>> {
         }
     }
     
-    Ok(PyBytes::new_bound(py, result.as_bytes()).unbind())
+    Ok(PyBytes::new(py, result.as_bytes()).unbind())
 }
 
 /// Python module definition
