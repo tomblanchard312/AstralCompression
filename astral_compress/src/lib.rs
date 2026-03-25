@@ -259,7 +259,7 @@ fn compress_text(py: Python, data: &[u8]) -> PyResult<Py<PyBytes>> {
         let token_str = &text[start..end];
         if token_str.chars().all(|c| c.is_alphabetic()) {
             let lower = token_str.to_lowercase();
-            if let Some(&abbr) = abbrevs.get(lower.as_str()) {
+            if abbrevs.contains_key(lower.as_str()) {
                 let flag = if token_str.chars().next().unwrap().is_uppercase() {
                     if token_str.chars().all(|c| c.is_uppercase()) { 2 } else { 1 }
                 } else { 0 };

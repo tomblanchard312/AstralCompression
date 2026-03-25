@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "astral-compression"
@@ -14,11 +14,14 @@ authors = [
 requires-python = ">=3.9"
 dependencies = []
 
+[tool.setuptools]
+packages = { find = { exclude = ["astral_compress*"] } }
+
 [project.optional-dependencies]
 rs    = ["reedsolo>=1.7"]
 voice = ["pycodec2>=4.0", "numpy>=1.24"]
 fast = ["astral-compress>=0.1.0", "zstd>=1.5"]
-all   = ["reedsolo>=1.7", "pycodec2>=4.0", "numpy>=1.24", "astral-compress>=0.1.0"]
+all   = ["reedsolo>=1.7", "pycodec2>=4.0", "numpy>=1.24", "astral-compress>=0.1.0", "zstd>=1.5"]
 
 [project.urls]
 Homepage = "https://github.com/tomblanchard312/AstralCompression"

@@ -96,12 +96,11 @@ def _detect_type(data: bytes) -> str:
 
 def _compress_text(data: bytes) -> tuple[int, int, bytes]:
     """Returns (transform_id, entropy_coder, payload_bytes)."""
-    # TODO: Fix Rust text compression
-    # if _RUST_AVAILABLE:
-    #     try:
-    #         return TRANSFORM_TEXT, ENTROPY_ZSTD, _ac.compress_text(data)
-    #     except Exception:
-    #         warnings.warn("Rust text compression failed, falling back to Python", UserWarning)
+    if _RUST_AVAILABLE:
+        try:
+            return TRANSFORM_TEXT, ENTROPY_ZSTD, _ac.compress_text(data)
+        except Exception:
+            warnings.warn("Rust text compression failed, falling back to Python", UserWarning)
     
     abbr_bytes = _text_abbrev_encode(data)
 
@@ -508,21 +507,48 @@ def decompress(data: bytes) -> bytes:
 
     # Select decompressor based on entropy coder
     def _entropy_decompress(payload: bytes) -> bytes:
-        if entropy_coder == ENTROPY_LZMA:
-            return lzma.decompress(payload)
-        elif entropy_coder == ENTROPY_ZLIB:
-            return zlib.decompress(payload)
-        elif entropy_coder == ENTROPY_ZSTD:
-            try:
+        # Try the indicated entropy coder first
+        try:
+            if entropy_coder == ENTROPY_LZMA:
+                return lzma.decompress(payload)
+            elif entropy_coder == ENTROPY_ZLIB:
+                return zlib.decompress(payload)
+            elif entropy_coder == ENTROPY_ZSTD:
                 import zstd
                 return zstd.decompress(payload)
-            except ImportError:
-                raise ValueError("zstd decompression not available - install with: pip install zstd")
-        elif entropy_coder == 0xFF:
-            # No entropy coding
-            return payload
-        else:
-            raise ValueError(f"Unknown entropy coder: 0x{entropy_coder:02X}")
+            elif entropy_coder == 0xFF:
+                # No entropy coding
+                return payload
+            else:
+                raise ValueError(f"Unknown entropy coder: 0x{entropy_coder:02X}")
+        except Exception as e:
+            # If primary coder fails, try alternatives for robustness
+            warning_msg = f"Primary entropy coder 0x{entropy_coder:02X} failed: {e}, trying alternatives"
+            warnings.warn(warning_msg, UserWarning)
+            
+            # Try other coders in order of preference
+            alternatives = []
+            if entropy_coder != ENTROPY_ZSTD:
+                alternatives.append((ENTROPY_ZSTD, "zstd"))
+            if entropy_coder != ENTROPY_LZMA:
+                alternatives.append((ENTROPY_LZMA, "lzma"))
+            if entropy_coder != ENTROPY_ZLIB:
+                alternatives.append((ENTROPY_ZLIB, "zlib"))
+            
+            for alt_coder, alt_name in alternatives:
+                try:
+                    if alt_coder == ENTROPY_LZMA:
+                        return lzma.decompress(payload)
+                    elif alt_coder == ENTROPY_ZLIB:
+                        return zlib.decompress(payload)
+                    elif alt_coder == ENTROPY_ZSTD:
+                        import zstd
+                        return zstd.decompress(payload)
+                except Exception:
+                    continue
+            
+            # If all alternatives fail, raise the original error
+            raise ValueError(f"All entropy decompression attempts failed, original error: {e}")
 
     if tid == TRANSFORM_PASSTHROUGH:
         try:
@@ -531,6 +557,14 @@ def decompress(data: bytes) -> bytes:
             return payload
 
     if tid == TRANSFORM_TEXT:
+        # Try Rust decompression first (handles both entropy and abbreviation decoding)
+        if _RUST_AVAILABLE:
+            try:
+                return _ac.decompress_text(payload)
+            except Exception:
+                warnings.warn("Rust text decompression failed, falling back to Python", UserWarning)
+        
+        # Fallback to Python: entropy decompress then abbreviation decode
         try:
             plain = _entropy_decompress(payload)
             return _text_abbrev_decode(plain)

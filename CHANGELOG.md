@@ -2,6 +2,17 @@
 
 ## 2026-03-24
 
+### Fixed
+- **Critical Bug Fixes for Deep-Space Reliability:**
+  - Extended McKay header to include entropy coder information for cross-compatibility between Rust and Python paths
+  - Improved exception handling with warning-based fallbacks instead of silent data corruption
+  - Changed quantization from Q16 to Q12 to prevent overflow in telemetry data
+  - Fixed text decompression routing to properly use entropy-aware decompression paths
+  - Removed regex dependency from Rust code, replaced with manual string processing
+  - Enabled Rust text compression with Python fallback for optimal performance
+- Fixed unused variable warning in Rust extension (src/lib.rs)
+- Updated pyproject.toml build configuration for proper package discovery
+
 ### Removed
 - Archived legacy standalone scripts removed:
   - compress_text_demo.py
