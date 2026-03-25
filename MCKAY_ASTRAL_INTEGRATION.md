@@ -1,4 +1,4 @@
-# 🇨🇦 McKay + ASTRAL Integration System
+# McKay + ASTRAL Integration System
 
 ## Overview
 
@@ -6,13 +6,13 @@
 
 > **Inspired by**: [Atlantis Data Burst](https://www.gateworld.net/wiki/Atlantis_data_burst) - Dr. McKay's fictional but scientifically-grounded approach to extreme data compression for long-distance space transmission. This implementation brings that concept to reality with modern compression algorithms and fountain codes.
 
-## 📚 Repository
+## Repository
 
 **GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
 
 **License**: MIT License with Attribution Requirement - See [LICENSE](LICENSE) for details.
 
-## 🚀 System Architecture
+## System Architecture
 
 ### GIST-First Atomized Packet System
 
@@ -38,13 +38,13 @@ The system uses ASTRAL's revolutionary architecture:
 
 ### Key Features
 
-- **✅ GIST-First**: Essential metadata survives even under severe packet loss
-- **✅ Atomized Packets**: 32-byte atoms with CRC-8 integrity
-- **✅ Progressive Decoding**: Get the gist first, then progressively recover full data
-- **✅ McKay Compression**: Extreme compression ratios (2x to 180x)
-- **✅ Fountain Codes**: Reliable transmission with packet loss tolerance
+- **GIST-First**: Essential metadata survives even under severe packet loss
+- **Atomized Packets**: 32-byte atoms with CRC-8 integrity
+- **Progressive Decoding**: Get the gist first, then progressively recover full data
+- **McKay Compression**: Extreme compression ratios (2x to 180x)
+- **Fountain Codes**: Reliable transmission with packet loss tolerance
 
-## 🔧 Data Type Support
+## Data Type Support
 
 ### TEXT
 - **Compression**: Semantic encoding with space mission vocabulary optimization
@@ -71,14 +71,14 @@ The system uses ASTRAL's revolutionary architecture:
 - **Ratio**: Variable based on content
 - **Features**: Frame-based compression, zlib integration
 
-## 📊 Performance Metrics
+## Performance Metrics
 
 ### Compression Ratios Achieved
-- **Telemetry Data**: Up to 180x compression! 🚀
-- **Image Patterns**: 64x compression 🖼️
-- **Random Binary**: 27x compression 🔧
-- **Text Messages**: 3x compression with semantic preservation 📝
-- **Voice Data**: 1.04x compression (already compressed format) 🎵
+- **Telemetry Data**: Up to 180x compression!
+- **Image Patterns**: 64x compression
+- **Random Binary**: 27x compression
+- **Text Messages**: 3x compression with semantic preservation
+- **Voice Data**: 1.04x compression (already compressed format)
 
 ### Transmission Reliability
 - **Packet Loss Tolerance**: Up to 80% packet loss with gist survival
@@ -86,7 +86,7 @@ The system uses ASTRAL's revolutionary architecture:
 - **Atomic Integrity**: Each 32-byte atom has CRC-8 integrity
 - **GIST Survival**: Essential metadata survives severe packet loss
 
-## 🚀 Usage Examples
+## Usage Examples
 
 ### Basic McKay Compression
 ```python
@@ -141,7 +141,7 @@ recovered_voice, voice_type, voice_metadata = mckay.unpack_mckay_message_atomize
 )
 ```
 
-## 🧪 Testing and Validation
+## Testing and Validation
 
 ### Maintained Command Set
 ```bash
@@ -161,14 +161,14 @@ python -m pytest tests
 ```
 
 ### Validation Results
-- **✅ Text**: 100% operational with semantic preservation
-- **✅ Binary**: 100% operational with extreme compression
-- **✅ Images**: 100% operational with pattern recognition
-- **✅ Voice**: 100% operational with GIST-first architecture
-- **✅ GIST-First**: 100% operational (metadata survives packet loss)
-- **✅ Atomized Packets**: 100% operational (CRC-8 integrity)
+- **Text**: 100% operational with semantic preservation
+- **Binary**: 100% operational with extreme compression
+- **Images**: 100% operational with pattern recognition
+- **Voice**: 100% operational with GIST-first architecture
+- **GIST-First**: 100% operational (metadata survives packet loss)
+- **Atomized Packets**: 100% operational (CRC-8 integrity)
 
-## 🔍 Technical Details
+## Technical Details
 
 ### McKay Compression Pipeline
 1. **Data Type Detection**: Automatic detection of TEXT, VOICE, VIDEO, IMAGE, BINARY
@@ -188,14 +188,47 @@ python -m pytest tests
 3. **Progressive Decoding**: Gist first, then progressive data recovery
 4. **Packet Loss Tolerance**: Essential information survives severe loss
 
-## 🚀 Deep Space Deployment
+### Why Rust Over C Libraries
+
+The core compression algorithms are implemented in **Rust** rather than traditional C libraries for several critical reasons:
+
+#### Memory Safety Without Runtime Overhead
+- **Rust's ownership system** prevents common C vulnerabilities like buffer overflows, use-after-free, and null pointer dereferences
+- **Compile-time guarantees** eliminate entire classes of bugs that plague C code
+- **Zero-cost abstractions** - Rust's safety features have no runtime performance penalty
+
+#### Performance Characteristics
+- **Native performance** comparable to optimized C code
+- **Predictable memory usage** with no garbage collection pauses
+- **Efficient CPU cache utilization** through Rust's data layout optimizations
+- **SIMD support** for vectorized operations in compression algorithms
+
+#### Developer Productivity and Maintenance
+- **Modern language features** like pattern matching, generics, and traits
+- **Excellent tooling** with cargo package manager and comprehensive testing frameworks
+- **Clear error messages** that make debugging significantly easier than C
+- **Fearless refactoring** - Rust's type system catches breaking changes at compile time
+
+#### Python Integration Benefits
+- **PyO3 framework** provides seamless Python bindings with minimal boilerplate
+- **Automatic memory management** between Rust and Python runtimes
+- **Type safety** across language boundaries prevents common FFI bugs
+
+#### Deep Space Mission Criticality
+- **Formal verification potential** - Rust's safety guarantees make it easier to reason about correctness
+- **Long-term maintainability** - Code that is correct by construction reduces mission risk
+- **Cross-platform compatibility** - Single codebase works across all target platforms
+
+While C libraries like zlib or custom C implementations could achieve similar performance, Rust provides the same speed with dramatically improved safety and maintainability - crucial for space mission software where failures can be catastrophic and code must remain reliable for decades.
+
+## Deep Space Deployment
 
 ### Mission Readiness
-- **✅ Text Transmission**: Ready for mission reports and telemetry
-- **✅ Binary Transmission**: Ready for scientific data and commands
-- **✅ Image Transmission**: Ready for visual data and surveillance
-- **✅ Voice Transmission**: Ready for audio communication
-- **✅ Video Transmission**: Ready for visual monitoring
+- **Text Transmission**: Ready for mission reports and telemetry
+- **Binary Transmission**: Ready for scientific data and commands
+- **Image Transmission**: Ready for visual data and surveillance
+- **Voice Transmission**: Ready for audio communication
+- **Video Transmission**: Ready for visual monitoring
 
 ### Transmission Parameters
 - **Block Size**: 16 bytes (optimized for fountain codes)
@@ -204,7 +237,7 @@ python -m pytest tests
 - **Compression Ratios**: 2x to 180x depending on data type
 - **Atomic Integrity**: CRC-8 checksums for each 32-byte atom
 
-## 🔧 Configuration Options
+## Configuration Options
 
 ### Compression Modes
 - **extreme**: Maximum compression (default)
@@ -221,7 +254,7 @@ python -m pytest tests
 - **adaptive_dict**: Dynamic dictionary for repeated patterns
 - **sequence_counter**: Unique identifier for each transmission
 
-## 📚 API Reference
+## API Reference
 
 ### McKayASTRALCompressor Class
 
@@ -243,7 +276,7 @@ python -m pytest tests
 - `_preprocess_image(data)`: Image-specific preprocessing
 - `_preprocess_binary(data)`: Binary-specific preprocessing
 
-## 🎯 Future Enhancements
+## Future Enhancements
 
 ### Planned Features
 - **Adaptive Compression**: Dynamic adjustment based on data patterns
@@ -258,7 +291,7 @@ python -m pytest tests
 - **Semantic Understanding**: Advanced content-aware compression
 - **Interplanetary Protocols**: Standards for deep space communication
 
-## 📖 References
+## References
 
 - **ASTRAL System**: [README.md](README.md)
 - **Fountain Codes**: Luby Transform (LT) codes for reliable transmission
@@ -268,7 +301,7 @@ python -m pytest tests
 
 ---
 
-## 📚 Repository & License
+## Repository & License
 
 **GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
 
@@ -278,4 +311,4 @@ python -m pytest tests
 
 ---
 
-**🇨🇦 Dr. Rodney McKay's Extreme Compression System is now 100% operational and ready for deployment to the Pegasus Galaxy and beyond!** 🚀✨
+**Dr. Rodney McKay's Extreme Compression System is now 100% operational and ready for deployment to the Pegasus Galaxy and beyond!**

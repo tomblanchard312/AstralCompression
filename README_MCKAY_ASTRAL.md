@@ -78,7 +78,7 @@ print(f"Total compression: {integration_stats['total_compression']:.2f}x")
 print(f"Fountain overhead: {integration_stats['fountain_overhead']} bytes")
 ```
 
-## 🔧 Advanced Usage
+## Advanced Usage
 
 ### Custom Compression Settings
 
@@ -117,7 +117,7 @@ astral/
 └── README_MCKAY_ASTRAL.md         # This file
 ```
 
-## 🧪 Testing and Examples
+## Testing and Examples
 
 ### Run Basic Tests
 
@@ -131,7 +131,7 @@ python astral/mckay_astral_integration.py
 python astral/mckay_usage_example.py
 ```
 
-## 🎯 Real-World Applications
+## Real-World Applications
 
 ### 1. Mission Communications
 
@@ -165,7 +165,7 @@ voice_message = encode_wav_to_bitstream("mission_log.wav")
 compressed = integration.compress_and_encode(voice_message, "VOICE", extra_fountain=25)
 ```
 
-## 🔍 How It Works
+## How It Works
 
 ### 1. McKay Preprocessing
 - **Semantic Analysis**: Recognizes space mission vocabulary
@@ -230,17 +230,17 @@ compressed = integration.compress_and_encode(data, "TEXT", extra_fountain=5)
 - **Unique data**: May only achieve 2-5x compression
 - **Voice data**: Use appropriate sampling rates and formats
 
-## 🌟 McKay's Compression Ratings
+## McKay's Compression Ratings
 
-- **🌟 McKay's Masterpiece**: 100x+ compression
-- **🚀 Exceptional**: 50-100x compression
-- **⭐ Excellent**: 20-50x compression
-- **✅ Very Good**: 10-20x compression
-- **👍 Good**: 5-10x compression
-- **⚠️ Acceptable**: 2-5x compression
-- **❌ Needs Work**: <2x compression
+- **McKay's Masterpiece**: 100x+ compression
+- **Exceptional**: 50-100x compression
+- **Excellent**: 20-50x compression
+- **Very Good**: 10-20x compression
+- **Good**: 5-10x compression
+- **Acceptable**: 2-5x compression
+- **Needs Work**: <2x compression
 
-## 🚀 Deep Space Deployment
+## Deep Space Deployment
 
 ### Transmission Optimization
 
@@ -274,7 +274,7 @@ print(f"Transmission time reduction: {bandwidth_saved:.0f}%")
 - **Real-time Optimization**: Dynamic compression based on transmission conditions
 - **Multi-format Support**: Additional data types and compression algorithms
 
-## 📚 References
+## References
 
 - **LZMA Algorithm**: 7-Zip compression technology
 - **Fountain Codes**: LT codes for error correction
@@ -285,11 +285,11 @@ print(f"Transmission time reduction: {bandwidth_saved:.0f}%")
 
 The McKay + ASTRAL system provides **extreme compression** for deep space communication while maintaining **data integrity** through your existing fountain codes. With compression ratios of **2-100x**, you can transmit massive amounts of mission data efficiently across vast distances.
 
-**Ready for deep space exploration with McKay's compression mastery!** 🚀✨
+**Ready for deep space exploration with McKay's compression mastery!**
 
 ---
 
-## 📚 Repository & License
+## Repository & License
 
 **GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
 
