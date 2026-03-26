@@ -28,7 +28,7 @@ def encode_stream(atom_stream: bytes, e: int = 16) -> bytes:
     codec = _RS_E16 if e == 16 else _RS_E8
     out = bytearray()
     for i in range(0, len(atom_stream), ATOM_SIZE):
-        out += codec.encode(atom_stream[i:i + ATOM_SIZE])
+        out += codec.encode(atom_stream[i : i + ATOM_SIZE])
     return bytes(out)
 
 
@@ -47,7 +47,7 @@ def decode_stream(rs_stream: bytes, e: int = 16) -> tuple[bytes, int, int]:
     n_uncorrectable = 0
 
     for i in range(0, len(rs_stream), cw_size):
-        cw = rs_stream[i:i + cw_size]
+        cw = rs_stream[i : i + cw_size]
         if len(cw) < cw_size:
             break
         try:

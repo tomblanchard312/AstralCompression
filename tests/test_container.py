@@ -1,4 +1,5 @@
 """Tests for astral/container.py - 32-byte atom framing."""
+
 import pytest
 from astral.container import (
     ATOM_SIZE,
@@ -67,8 +68,7 @@ class TestParseAtoms:
 
     def test_multiple_atoms(self):
         atoms = b"".join(
-            make_atom(i, 5, 0xABCD, FOUNTAIN_PACKET, bytes([i] * 21))
-            for i in range(5)
+            make_atom(i, 5, 0xABCD, FOUNTAIN_PACKET, bytes([i] * 21)) for i in range(5)
         )
         parsed = parse_atoms(atoms)
         assert len(parsed) == 5

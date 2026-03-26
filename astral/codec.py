@@ -24,7 +24,7 @@ HEADER_REDUNDANCY = 4  # replicate header atoms to reduce header-loss failures
 def chunk_blocks(payload: bytes, symbol_size: int):
     blocks = []
     for i in range(0, len(payload), symbol_size):
-        chunk = payload[i:i + symbol_size]
+        chunk = payload[i : i + symbol_size]
         if len(chunk) < symbol_size:
             chunk = chunk + bytes(symbol_size - len(chunk))
         blocks.append(chunk)
@@ -48,7 +48,7 @@ def pack_message(
         raise ValueError("extra_fountain must be non-negative")
 
     if message_id is None:
-        message_id = (int.from_bytes(os.urandom(2), "little") or 1)
+        message_id = int.from_bytes(os.urandom(2), "little") or 1
 
     # 1) Build gist and payload
     gist_bytes, gist_bits = make_gist_bits(msg)
@@ -72,7 +72,7 @@ def pack_message(
     header[9] = (payload_len >> 16) & 0xFF
     header[10] = gist_bits & 0xFF
     gist_room = 21 - 11
-    header[11: 11 + min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
+    header[11 : 11 + min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
 
     atoms = []
     for _ in range(HEADER_REDUNDANCY):
@@ -80,9 +80,7 @@ def pack_message(
 
     # 4) Fountain packets with adaptive minimum redundancy.
     M = K + max(int(min_redundancy), K) + int(extra_fountain)
-    packets = lt_encode_blocks(
-        blocks, seed=fountain_seed, num_packets=M
-    )
+    packets = lt_encode_blocks(blocks, seed=fountain_seed, num_packets=M)
     for i, (seed, degree, block) in enumerate(packets, start=len(atoms)):
         p = bytearray(21)
         p[0:4] = seed.to_bytes(4, "little")
@@ -105,7 +103,7 @@ def pack_text_with_dict(
     min_redundancy: int = 10,
 ) -> bytes:
     if message_id is None:
-        message_id = (int.from_bytes(os.urandom(2), "little") or 1)
+        message_id = int.from_bytes(os.urandom(2), "little") or 1
     # 1) send dict update atoms
     msgmeta = {"type": "TEXT", "conf": 0.99}
     gist_bytes, gist_bits = make_gist_bits(msgmeta)
@@ -130,7 +128,7 @@ def pack_text_with_dict(
     header[9] = (payload_len >> 16) & 0xFF
     header[10] = gist_bits & 0xFF
     gist_room = 21 - 11
-    header[11: 11 + min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
+    header[11 : 11 + min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
     atoms = []
     atoms.append((0, HEADER_GIST, bytes(header)))
     # DICT_UPDATE atoms (insert right after header)
@@ -138,9 +136,7 @@ def pack_text_with_dict(
         atoms.append((len(atoms), 2, dp))
     # Adaptive redundancy floor lets links trade robustness vs throughput.
     M = K + max(int(min_redundancy), K) + int(extra_fountain)
-    packets = lt_encode_blocks(
-        blocks, seed=fountain_seed, num_packets=M
-    )
+    packets = lt_encode_blocks(blocks, seed=fountain_seed, num_packets=M)
     for i, (seed, degree, block) in enumerate(packets, start=len(atoms)):
         p = bytearray(21)
         p[0:4] = seed.to_bytes(4, "little")
@@ -238,7 +234,7 @@ def _pack_with_custom_payload(
     min_redundancy: int = 10,
 ) -> bytes:
     if message_id is None:
-        message_id = (int.from_bytes(os.urandom(2), "little") or 1)
+        message_id = int.from_bytes(os.urandom(2), "little") or 1
     gist_bytes, gist_bits = make_gist_bits(msgmeta)
     payload_len = len(payload)
     blocks = chunk_blocks(payload, SYMBOL_SIZE)
@@ -259,14 +255,12 @@ def _pack_with_custom_payload(
     header[9] = (payload_len >> 16) & 0xFF
     header[10] = gist_bits & 0xFF
     gist_room = 21 - 11
-    header[11:11 + min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
+    header[11 : 11 + min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
     atoms = []
     for _ in range(HEADER_REDUNDANCY):
         atoms.append((len(atoms), HEADER_GIST, bytes(header)))
     M = K + max(int(min_redundancy), K) + int(extra_fountain)
-    packets = lt_encode_blocks(
-        blocks, seed=fountain_seed, num_packets=M
-    )
+    packets = lt_encode_blocks(blocks, seed=fountain_seed, num_packets=M)
     for i, (seed, degree, block) in enumerate(packets, start=len(atoms)):
         p = bytearray(21)
         p[0:4] = seed.to_bytes(4, "little")
@@ -276,9 +270,7 @@ def _pack_with_custom_payload(
     total_atoms = len(atoms)
     out = bytearray()
     for idx, typ, payload21 in atoms:
-        out += make_atom(
-            idx, total_atoms, message_id, typ, payload21
-        )
+        out += make_atom(idx, total_atoms, message_id, typ, payload21)
     return bytes(out)
 
 
@@ -314,16 +306,12 @@ def unpack_stream(stream: bytes):
 
     K = header_atom[0] | (header_atom[1] << 8)
     symbol_size = header_atom[2]
-    payload_len = (
-        header_atom[7]
-        | (header_atom[8] << 8)
-        | (header_atom[9] << 16)
-    )
+    payload_len = header_atom[7] | (header_atom[8] << 8) | (header_atom[9] << 16)
     gist_bits = header_atom[10]
     gist_room = 21 - 11
     # Calculate how many bytes the gist bits actually occupy
     gist_bytes_needed = (gist_bits + 7) // 8
-    gist_bytes = header_atom[11:11 + min(gist_bytes_needed, gist_room)]
+    gist_bytes = header_atom[11 : 11 + min(gist_bytes_needed, gist_room)]
 
     gist = parse_gist(gist_bytes, gist_bits)
 
@@ -357,15 +345,13 @@ def unpack_stream(stream: bytes):
                             "extra_words": extra_words,
                         }
                     else:
-                        message = {"type": "TEXT",
-                                   "text": decode_text(payload)}
+                        message = {"type": "TEXT", "text": decode_text(payload)}
                 elif mtype == "VOICE":
                     message = {"type": "VOICE", "bytes": payload}
                 elif mtype == "CMD":
                     message = {"type": "CMD", "cmd": decode_cmd(payload)}
                 elif mtype == "CMD_BATCH":
-                    message = {"type": "CMD_BATCH",
-                               "batch": decode_cmd_batch(payload)}
+                    message = {"type": "CMD_BATCH", "batch": decode_cmd_batch(payload)}
                 else:
                     message = decode_payload(payload)
                 complete = True
@@ -536,9 +522,7 @@ def unpack_stream_rs(rs_stream: bytes, e: int = 16) -> dict:
     from .rs_fec import decode_stream as _rs_decode
 
     try:
-        astral_stream, n_corrected, n_uncorrectable = _rs_decode(
-            rs_stream, e=e
-        )
+        astral_stream, n_corrected, n_uncorrectable = _rs_decode(rs_stream, e=e)
     except (TypeError, ValueError) as exc:
         return {"error": f"rs decode error: {exc}", "rs_e": e}
 

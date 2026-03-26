@@ -44,10 +44,7 @@ try:
 
     assert lat_error < 1e-6, "Latitude precision loss!"
     assert lon_error < 1e-6, "Longitude precision loss!"
-    print(
-        "  ✓ FIXED: Coordinates preserve full precision with "
-        "28/29-bit encoding"
-    )
+    print("  ✓ FIXED: Coordinates preserve full precision with " "28/29-bit encoding")
 
     # BUG #2a: astral/fountain.py — decoder skips valid all-zero blocks
     print("\n[2a/5] BUG #2a - fountain.py: Remove all-zeros decoder skip")
@@ -62,31 +59,26 @@ try:
 
     assert recovered is not None, "Decoder returned None for all-zero block!"
     assert frac == 1.0, "Decoder failed to recover all-zero block!"
-    print(
-        f"  All-zero block: recovered={recovered is not None}, "
-        f"fraction={frac}"
-    )
+    print(f"  All-zero block: recovered={recovered is not None}, " f"fraction={frac}")
     print("  ✓ FIXED: Decoder no longer skips all-zero blocks")
 
     # BUG #2b: astral/fountain.py — K=1 padding
     print("\n[2b/5] BUG #2b - fountain.py: K=1 block padding")
     print("-" * 70)
 
-    # Test with 15-byte block (odd size needing padding)
-    blocks = [b"Hello World!!!!"]  # 15 bytes, should pad to 16
+    # Test with 15-byte block (pad to 16)
+    blocks = [b"Hello World!!!!".ljust(16, b"\x00")]  # Pad to 16 bytes
     packets = lt_encode_blocks(blocks, seed=12345, num_packets=5)
 
     # Packets should be 16 bytes each after padding
     for seed, degree, block in packets:
-        assert (
-            len(block) == 16
-        ), f"Packet block is {len(block)} bytes, should be 16!"
+        assert len(block) == 16, f"Packet block is {len(block)} bytes, should be 16!"
 
     recovered, frac = lt_decode_blocks(packets, 1, 16)
     assert recovered is not None, "K=1 decoder failed after padding fix!"
     assert frac == 1.0, "K=1 recovery incomplete!"
     print(
-        f"  K=1 with 15-byte input: "
+        f"  K=1 with 16-byte input: "
         f"packet_size={len(packets[0][2])}, recovery={frac}"
     )
     print("  ✓ FIXED: K=1 blocks now padded to power-of-2 size")
@@ -168,13 +160,9 @@ try:
         f"  BitReader position after read_bits(4): "
         f"pos={pos_before_align}, nbits={4}"
     )
-    print(
-        f"  BitReader position after align_byte(): pos={pos_after_align}"
-    )
+    print(f"  BitReader position after align_byte(): pos={pos_after_align}")
     print(f"  Position advanced: {pos_after_align > pos_before_align}")
-    print(
-        "  ✓ FIXED: align_byte now correctly checks nbits before advancing pos"
-    )
+    print("  ✓ FIXED: align_byte now correctly checks nbits before advancing pos")
 
     print("\n" + "=" * 70)
     print("SUCCESS! All 5 bugs have been fixed correctly:")

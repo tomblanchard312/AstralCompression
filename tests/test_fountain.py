@@ -1,4 +1,5 @@
 """Tests for astral/fountain.py - xorshift32 PRNG and LT fountain code."""
+
 import pytest
 from astral.fountain import (
     _Xorshift32,
@@ -75,9 +76,9 @@ class TestLtFountain:
         """K=1: single block encodes and decodes correctly."""
         block = bytes(range(self.SYMBOL_SIZE))
         packets = lt_encode_blocks([block], seed=42, num_packets=5)
-        assert all(len(p[2]) == self.SYMBOL_SIZE for p in packets), (
-            "All K=1 packets must have exactly symbol_size bytes"
-        )
+        assert all(
+            len(p[2]) == self.SYMBOL_SIZE for p in packets
+        ), "All K=1 packets must have exactly symbol_size bytes"
         recovered, frac = lt_decode_blocks(packets, K=1, symbol_size=self.SYMBOL_SIZE)
         assert recovered is not None
         assert frac == 1.0

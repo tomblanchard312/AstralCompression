@@ -28,11 +28,9 @@ def apply_prng(data: bytes) -> bytes:
         byte_val = 0
         for bit_pos in range(8):
             out_bit = (state >> 7) & 1
-            byte_val |= (out_bit << (7 - bit_pos))
+            byte_val |= out_bit << (7 - bit_pos)
             # Feedback taps: bits 7, 6, 4, 2 of current state
-            feedback = (
-                (state >> 7) ^ (state >> 6) ^ (state >> 4) ^ (state >> 2)
-            ) & 1
+            feedback = ((state >> 7) ^ (state >> 6) ^ (state >> 4) ^ (state >> 2)) & 1
             state = ((state << 1) | feedback) & 0xFF
         seq.append(byte_val)
     return bytes(a ^ b for a, b in zip(data, seq))
@@ -85,7 +83,7 @@ def encode_frames(
 
     out = bytearray()
     for i in range(0, len(data), FRAME_DATA_SIZE):
-        chunk = data[i:i + FRAME_DATA_SIZE]
+        chunk = data[i : i + FRAME_DATA_SIZE]
         if len(chunk) < FRAME_DATA_SIZE:
             chunk = chunk + bytes([FILL_BYTE] * (FRAME_DATA_SIZE - len(chunk)))
 
@@ -119,7 +117,7 @@ def decode_frames(wire: bytes, randomise: bool = True) -> tuple[bytes, dict]:
 
     max_start = len(wire) - WIRE_FRAME_SIZE + 1
     for i in range(0, max_start, WIRE_FRAME_SIZE):
-        chunk = wire[i:i + WIRE_FRAME_SIZE]
+        chunk = wire[i : i + WIRE_FRAME_SIZE]
         if chunk[:4] != ASM:
             continue
 

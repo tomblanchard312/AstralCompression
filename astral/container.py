@@ -20,11 +20,7 @@ def make_atom(
     # Input validation
     if not isinstance(atom_index, int) or atom_index < 0 or atom_index > 65535:
         raise ValueError("atom_index must be 0-65535")
-    if (
-        not isinstance(total_atoms, int)
-        or total_atoms <= 0
-        or total_atoms > 65535
-    ):
+    if not isinstance(total_atoms, int) or total_atoms <= 0 or total_atoms > 65535:
         raise ValueError("total_atoms must be 1-65535")
     if not isinstance(message_id, int) or message_id < 0 or message_id > 65535:
         raise ValueError("message_id must be 0-65535")
@@ -58,7 +54,7 @@ def parse_atoms(stream: bytes):
 
     out = []
     for i in range(0, len(stream), ATOM_SIZE):
-        chunk = stream[i:i + ATOM_SIZE]
+        chunk = stream[i : i + ATOM_SIZE]
         if len(chunk) < ATOM_SIZE:
             break
         if chunk[0] != SYNC0 or chunk[1] != SYNC1:

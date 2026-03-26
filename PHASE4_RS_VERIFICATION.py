@@ -1,4 +1,3 @@
-import reedsolo
 from astral.rs_fec import (
     encode_stream,
     decode_stream,
@@ -7,6 +6,8 @@ from astral.rs_fec import (
     CODEWORD_SIZE,
     PARITY_E16,
     PARITY_E8,
+    _RS_E16,
+    _RS_E8,
 )
 from astral.codec import (
     pack_message,
@@ -25,7 +26,6 @@ assert codeword_size(16) == 64
 assert codeword_size(8) == 48
 
 # 2. RS codec uses exact CCSDS parameters
-from astral.rs_fec import _RS_E16, _RS_E8
 
 ref_enc = _RS_E16.encode(bytes(32))
 assert len(ref_enc) == 64, f"expected 64 bytes, got {len(ref_enc)}"
@@ -158,9 +158,9 @@ for cw_idx in [3, 7]:
         corrupted2[base + j] ^= 0xFF
 result2 = unpack_stream_rs(bytes(corrupted2), e=16)
 assert result2["rs_uncorrectable_atoms"] == 2
-assert result2["complete"] is True, (
-    f"fountain should recover from 2 dropped atoms, got: {result2}"
-)
+assert (
+    result2["complete"] is True
+), f"fountain should recover from 2 dropped atoms, got: {result2}"
 
 # 15. E=8 end-to-end
 rs_e8_stream = pack_message_rs(msg, extra_fountain=5, e=8)

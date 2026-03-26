@@ -73,7 +73,9 @@ assert mc_r == 0 and vc_r == 0, "reset() must clear all counters"
 # Single-frame: data <= 1107 bytes -> 1 wire frame = 1119 bytes
 small_data = bytes(500)
 wire_small = encode_frames(small_data, scid=42, vcid=0)
-assert len(wire_small) == WIRE_FRAME_SIZE, f"expected {WIRE_FRAME_SIZE}, got {len(wire_small)}"
+assert (
+    len(wire_small) == WIRE_FRAME_SIZE
+), f"expected {WIRE_FRAME_SIZE}, got {len(wire_small)}"
 
 # Multi-frame: data > 1107 bytes -> ceil(len/1107) frames
 large_data = bytes(2500)
@@ -83,7 +85,9 @@ assert len(wire_large) == expected_frames * WIRE_FRAME_SIZE
 
 # 7. Wire frame structure
 c4 = TmFrameCounter()
-wire_one = encode_frames(bytes(FRAME_DATA_SIZE), scid=0x2A, vcid=3, counter=c4, randomise=False)
+wire_one = encode_frames(
+    bytes(FRAME_DATA_SIZE), scid=0x2A, vcid=3, counter=c4, randomise=False
+)
 assert len(wire_one) == WIRE_FRAME_SIZE
 # Check ASM
 assert wire_one[:4] == ASM, f"ASM missing: {wire_one[:4].hex()}"
@@ -109,7 +113,9 @@ c5 = TmFrameCounter()
 data_pattern = bytes(range(256)) * (FRAME_DATA_SIZE // 256 + 1)
 data_pattern = data_pattern[:FRAME_DATA_SIZE]
 wire_rnd = encode_frames(data_pattern, scid=1, vcid=0, counter=c5, randomise=True)
-wire_clr = encode_frames(data_pattern, scid=1, vcid=0, counter=TmFrameCounter(), randomise=False)
+wire_clr = encode_frames(
+    data_pattern, scid=1, vcid=0, counter=TmFrameCounter(), randomise=False
+)
 # Headers (bytes 4-9) must be identical (not randomised)
 assert wire_rnd[4:10] == wire_clr[4:10], "header must not be randomised"
 # Data fields must differ (randomised vs clear)
@@ -185,9 +191,9 @@ last_frame_start = (n_wire_frames - 1) * WIRE_FRAME_SIZE
 wire_loss[last_frame_start + 4 + FRAME_HEADER_SIZE + 5] ^= 0xFF
 result_loss = unpack_frames_tm(bytes(wire_loss))
 assert result_loss["tm_n_crc_errors"] >= 1
-assert result_loss["complete"] is True, (
-    "fountain should recover from 1 dropped TM frame (extra_fountain=50)"
-)
+assert (
+    result_loss["complete"] is True
+), "fountain should recover from 1 dropped TM frame (extra_fountain=50)"
 
 # 16. Existing API still works
 plain = pack_message(msg, extra_fountain=3)

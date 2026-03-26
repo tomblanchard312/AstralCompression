@@ -54,10 +54,7 @@ def cmd_pack(args):
         msg = read_json(args.input)
         blob = pack_message(msg, extra_fountain=args.extra)
         write_bin(args.output, blob)
-        print(
-            f"Wrote {len(blob)} bytes to {args.output} "
-            f"({len(blob)//32} atoms)."
-        )
+        print(f"Wrote {len(blob)} bytes to {args.output} " f"({len(blob)//32} atoms).")
     except Exception as e:
         print(f"Error packing message: {e}")
         return 1
@@ -83,7 +80,7 @@ def cmd_simulate(args):
         import random
 
         for i in range(0, len(data), atom_size):
-            atom = data[i:i + atom_size]
+            atom = data[i : i + atom_size]
             if len(atom) < atom_size:
                 break
             if random.random() >= args.drop:
@@ -150,11 +147,7 @@ def cmd_unpack_voice(args):
     try:
         result = unpack_stream(read_bin(args.input))
         if not result.get("complete"):
-            print(
-                json.dumps(
-                    {"error": "incomplete", "gist": result.get("gist", {})}
-                )
-            )
+            print(json.dumps({"error": "incomplete", "gist": result.get("gist", {})}))
             return 0
         msg = result.get("message")
         if not isinstance(msg, dict) or msg.get("type") != "VOICE":
@@ -277,9 +270,7 @@ def cmd_decode_rs(args):
         from .rs_fec import decode_stream, CODEWORD_SIZE
 
         rs_stream = read_bin(args.input)
-        atom_stream, n_corrected, n_uncorrectable = decode_stream(
-            rs_stream, e=args.e
-        )
+        atom_stream, n_corrected, n_uncorrectable = decode_stream(rs_stream, e=args.e)
         write_bin(args.output, atom_stream)
         n_atoms = len(atom_stream) // 32
         stats = {
@@ -346,9 +337,7 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="astral")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    p_pack = sub.add_parser(
-        "pack", help="pack JSON message to atomized binary"
-    )
+    p_pack = sub.add_parser("pack", help="pack JSON message to atomized binary")
     p_pack.add_argument("input")
     p_pack.add_argument("output")
     p_pack.add_argument(
@@ -434,9 +423,7 @@ def main(argv=None):
         "frame-tm",
         help="segment an ASTRAL binary into CCSDS TM Transfer Frames",
     )
-    p_frame_tm.add_argument(
-        "input", help="ASTRAL binary (or RS-protected) file"
-    )
+    p_frame_tm.add_argument("input", help="ASTRAL binary (or RS-protected) file")
     p_frame_tm.add_argument("output", help="TM wire stream output file")
     p_frame_tm.add_argument(
         "--scid",
@@ -484,9 +471,7 @@ def main(argv=None):
     p_pack_text_dict.add_argument("--extra", type=int, default=0)
     p_pack_text_dict.set_defaults(func=cmd_pack_text_dict)
 
-    p_pack_voice = sub.add_parser(
-        "pack-voice", help="pack a VOICE message from WAV"
-    )
+    p_pack_voice = sub.add_parser("pack-voice", help="pack a VOICE message from WAV")
     p_pack_voice.add_argument("input")
     p_pack_voice.add_argument("output")
     p_pack_voice.add_argument("--extra", type=int, default=0)
@@ -499,15 +484,11 @@ def main(argv=None):
     p_unpack_voice.add_argument("output")
     p_unpack_voice.set_defaults(func=cmd_unpack_voice)
 
-    p_pack_cmd = sub.add_parser(
-        "pack-cmd", help="pack a CMD message from JSON string"
-    )
+    p_pack_cmd = sub.add_parser("pack-cmd", help="pack a CMD message from JSON string")
     p_pack_cmd.add_argument("json")
     p_pack_cmd.add_argument("output")
     p_pack_cmd.add_argument("--extra", type=int, default=0)
-    p_pack_cmd.add_argument(
-        "--key", help="hex key for HMAC auth", default=None
-    )
+    p_pack_cmd.add_argument("--key", help="hex key for HMAC auth", default=None)
     p_pack_cmd.set_defaults(func=cmd_pack_cmd)
 
     p_pack_cmd_batch = sub.add_parser(

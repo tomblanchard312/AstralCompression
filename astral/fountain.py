@@ -22,7 +22,7 @@ class _Xorshift32:
         """Return the next 32-bit unsigned integer."""
         x = self._state
         x ^= (x << 13) & 0xFFFFFFFF
-        x ^= (x >> 17)
+        x ^= x >> 17
         x ^= (x << 5) & 0xFFFFFFFF
         self._state = x & 0xFFFFFFFF
         return self._state
@@ -46,9 +46,7 @@ class _Xorshift32:
         Equivalent to random.sample(range(n), k) but portable.
         """
         if k < 0 or k > n:
-            raise ValueError(
-                f"sample size {k} out of range for population {n}"
-            )
+            raise ValueError(f"sample size {k} out of range for population {n}")
         if k == 0:
             return []
 

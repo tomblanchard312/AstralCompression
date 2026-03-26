@@ -1,4 +1,4 @@
-import json, random
+import random
 from astral.codec import pack_message, unpack_stream
 
 
@@ -14,7 +14,7 @@ def test_roundtrip():
     }
     blob = pack_message(msg, extra_fountain=3)
     out = unpack_stream(blob)
-    assert out["complete"] == True
+    assert out["complete"] is True
     assert abs(out["message"]["lat"] - msg["lat"]) < 1e-6
 
 

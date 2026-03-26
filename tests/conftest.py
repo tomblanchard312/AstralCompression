@@ -1,4 +1,5 @@
 """Shared fixtures for the ASTRAL test suite."""
+
 import pytest
 
 

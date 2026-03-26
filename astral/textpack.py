@@ -150,7 +150,7 @@ def decode_text(b: bytes) -> str:
             try:
                 ln, pos = leb128_decode(b, pos)
                 if pos + ln <= len(b):
-                    s = b[pos:pos + ln].decode("utf-8", errors="replace")
+                    s = b[pos : pos + ln].decode("utf-8", errors="replace")
                     pos += ln
                     toks.append(s)
                 else:

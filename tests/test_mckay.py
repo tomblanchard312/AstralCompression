@@ -1,4 +1,5 @@
 """Tests for McKay v2 compression engine."""
+
 from __future__ import annotations
 
 import math
@@ -33,7 +34,7 @@ class TestHeader:
         assert stored == len(data)
 
     def test_unknown_transform_raises(self):
-        bad = bytearray(b"MK\x02\xFF\x05\x00\x00\x00") + b"garbage"
+        bad = bytearray(b"MK\x02\xff\x05\x00\x00\x00") + b"garbage"
         with pytest.raises(ValueError, match="Unknown"):
             decompress(bytes(bad))
 
@@ -182,6 +183,87 @@ class TestMcKayCompressorClass:
         c2 = mc2400.compress(data, "BINARY")
         assert mc1200.decompress(c1) == data
         assert mc2400.decompress(c2) == data
+
+
+class TestRustIntegration:
+    """Test that Rust libraries are used when available."""
+
+    def test_rust_telemetry_compression_used(self):
+        """Test that Rust telemetry compression is used without warnings."""
+        import astral.mckay_astral_integration as mai
+
+        if not mai._RUST_AVAILABLE:
+            pytest.skip("Rust extension not available")
+
+        import numpy as np
+
+        np.random.seed(42)
+        data = np.random.randn(300).astype(np.float32)
+        data_bytes = b"".join(struct.pack(">f", x) for x in data)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            compressed = compress(data_bytes, "TELEMETRY", channels=3)
+            decompressed = decompress(compressed)
+
+        # Should not have any warnings about Rust failure
+        rust_warnings = [warning for warning in w if "Rust" in str(warning.message)]
+        assert (
+            len(rust_warnings) == 0
+        ), f"Rust telemetry compression failed: {rust_warnings}"
+        assert len(decompressed) == len(data_bytes)
+
+    def test_rust_binary_float_compression_used(self):
+        """Test that Rust binary float compression is used without warnings."""
+        import astral.mckay_astral_integration as mai
+
+        if not mai._RUST_AVAILABLE:
+            pytest.skip("Rust extension not available")
+
+        import numpy as np
+
+        data = np.array([1.5, -2.25, 3.75, 0.0], dtype=np.float32)
+        data_bytes = data.tobytes()
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            compressed = compress(data_bytes, "BINARY")
+            decompressed = decompress(compressed)
+
+        # Should not have any warnings about Rust failure
+        rust_warnings = [warning for warning in w if "Rust" in str(warning.message)]
+        assert (
+            len(rust_warnings) == 0
+        ), f"Rust binary float compression failed: {rust_warnings}"
+        assert decompressed == data_bytes
+
+    def test_rust_compression_ratios(self):
+        """Test that Rust compression provides good compression ratios."""
+        import astral.mckay_astral_integration as mai
+
+        if not mai._RUST_AVAILABLE:
+            pytest.skip("Rust extension not available")
+
+        # Test telemetry compression ratio with structured data
+        import math
+
+        telemetry_data = [
+            20.0 + 0.5 * math.sin(2 * math.pi * i / 100) + (i % 3) * 0.001
+            for i in range(1000)
+        ]
+        data_bytes = b"".join(struct.pack(">f", x) for x in telemetry_data)
+        compressed = compress(data_bytes, "TELEMETRY", channels=1)
+        ratio = len(data_bytes) / (len(compressed) - 8)
+        assert ratio >= 3.0, f"Rust telemetry compression ratio {ratio:.2f}x < 3x"
+
+        # Test binary float compression ratio
+        import numpy as np
+
+        # Use some structured float data
+        binary_data = np.array([1.0, 2.0, 3.0] * 1000, dtype=np.float32).tobytes()
+        compressed = compress(binary_data, "BINARY")
+        ratio = len(binary_data) / (len(compressed) - 8)
+        assert ratio >= 2.0, f"Rust binary float compression ratio {ratio:.2f}x < 2x"
 
 
 _ = TRANSFORM_TEXT

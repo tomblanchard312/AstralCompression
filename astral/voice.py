@@ -33,8 +33,7 @@ def _read_wav_mono_16(path: str) -> List[float]:
     samples = list(struct.unpack("<" + "h" * (len(raw) // 2), raw))
     if nch == 2:
         samples = [
-            (samples[i * 2] + samples[i * 2 + 1]) // 2
-            for i in range(len(samples) // 2)
+            (samples[i * 2] + samples[i * 2 + 1]) // 2 for i in range(len(samples) // 2)
         ]
 
     if fs != FS:
@@ -51,7 +50,9 @@ def _read_wav_mono_16(path: str) -> List[float]:
 
 def _autocorr(frame: List[float], order: int) -> List[float]:
     n = len(frame)
-    return [sum(frame[i] * frame[i + k] for i in range(n - k)) for k in range(order + 1)]
+    return [
+        sum(frame[i] * frame[i + k] for i in range(n - k)) for k in range(order + 1)
+    ]
 
 
 def _levinson_durbin(r: List[float], order: int) -> List[float]:

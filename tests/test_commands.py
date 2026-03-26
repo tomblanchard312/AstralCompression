@@ -1,4 +1,5 @@
 """Tests for astral/commands.py — encoding and anti-replay."""
+
 from __future__ import annotations
 
 import pytest
@@ -21,7 +22,10 @@ class TestEncodeDecodeCmd:
 
     def test_set_mode_roundtrip(self):
         for mode in ("SAFE", "NORMAL", "SCIENCE"):
-            assert decode_cmd(encode_cmd({"name": "SET_MODE", "mode": mode}))["mode"] == mode
+            assert (
+                decode_cmd(encode_cmd({"name": "SET_MODE", "mode": mode}))["mode"]
+                == mode
+            )
 
     def test_unknown_command_raises(self):
         with pytest.raises(ValueError):
@@ -75,7 +79,10 @@ class TestAntiReplay:
         assert dec.get("counter_ok") is True
 
     def test_batch_replay_flagged(self):
-        batch = {"policy": {}, "items": [{"tai_offset_s": 0, "cmd": {"name": "REBOOT"}}]}
+        batch = {
+            "policy": {},
+            "items": [{"tai_offset_s": 0, "cmd": {"name": "REBOOT"}}],
+        }
         enc = encode_cmd_batch(batch, key=KEY, counter=1)
         dec = decode_cmd_batch(enc, key=KEY, counter=2)
         assert dec.get("counter_ok") is False

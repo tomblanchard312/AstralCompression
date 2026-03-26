@@ -1,6 +1,13 @@
 """Tests for astral/grammar.py - gist bits and payload encoding."""
+
 import pytest
-from astral.grammar import DICT_TYPE, decode_payload, encode_payload, make_gist_bits, parse_gist
+from astral.grammar import (
+    DICT_TYPE,
+    decode_payload,
+    encode_payload,
+    make_gist_bits,
+    parse_gist,
+)
 
 
 class TestPayloadRoundtrip:

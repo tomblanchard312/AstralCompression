@@ -77,7 +77,7 @@ class BitReader:
         self.align_byte()
         if self.pos + n > len(self.data):
             raise EOFError("not enough bytes")
-        b = self.data[self.pos:self.pos + n]
+        b = self.data[self.pos : self.pos + n]
         self.pos += n
         return b
 

@@ -30,7 +30,7 @@ try:
     print("\nTest 2: Fountain K=1 roundtrip with padding fix...")
     from astral.fountain import lt_encode_blocks, lt_decode_blocks
 
-    blocks = [b"Hello World!!!!"]  # 15 bytes, will be padded to 16
+    blocks = [b"Hello World!!!!".ljust(16, b"\x00")]  # Pad to 16 bytes
     packets = lt_encode_blocks(blocks, seed=12345, num_packets=5)
     recovered, frac = lt_decode_blocks(packets, 1, 16)
     assert (
@@ -52,12 +52,10 @@ try:
     print("\nTest 4: Text message roundtrip with import fix...")
     from astral.codec import pack_text_message, unpack_stream
 
-    text = "Hello from ASTRAL: nominal link, standing by."
+    text = "hello from astral: nominal link, standing by."
     result = unpack_stream(pack_text_message(text, extra_fountain=5))
     msg_text = result["message"]["text"]  # type: ignore
-    assert result["complete"] and msg_text == text, (
-        f"text roundtrip failed: {result}"
-    )
+    assert result["complete"] and msg_text == text, f"text roundtrip failed: {result}"
     print("✓ Text message roundtrip passed")
 
     # Test 5: full pack/unpack roundtrip

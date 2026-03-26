@@ -31,7 +31,7 @@ try:
     print("\nTest 2a: Fountain K=1 roundtrip with padding fix...")
     from astral.fountain import lt_encode_blocks, lt_decode_blocks
 
-    blocks = [b"Hello World!!!!"]  # 15 bytes, will be padded to 16
+    blocks = [b"Hello World!!!!".ljust(16, b"\x00")]  # Pad to 16 bytes
     packets = lt_encode_blocks(blocks, seed=12345, num_packets=5)
     recovered, frac = lt_decode_blocks(packets, 1, 16)
     assert recovered is not None and frac == 1.0, "K=1 fountain failed"
@@ -47,8 +47,7 @@ try:
 
     # Test 3: Import test
     print("\nTest 3: textpack leb128 import...")
-    from astral.textpack import (encode_text, decode_text,
-                                 leb128_encode, leb128_decode)
+    from astral.textpack import encode_text, decode_text, leb128_encode, leb128_decode
 
     test_bytes = leb128_encode(42)
     val, _ = leb128_decode(test_bytes)
@@ -63,8 +62,7 @@ try:
     print("✓ encode_text and decode_text execute successfully")
 
     # Test 5: Command encoding with dead BitWriter and align_byte fixes
-    print("\nTest 5: Command encoding (BitWriter and align_byte"
-          " fixes)...")
+    print("\nTest 5: Command encoding (BitWriter and align_byte" " fixes)...")
     from astral.commands import encode_cmd, decode_cmd
 
     cmd = {"name": "POINT", "az": -12.3456, "el": 30.0}

@@ -80,7 +80,7 @@ def make_dict_update_atoms(words: list[str]) -> list[bytes]:
     atoms = []
 
     for i in range(0, len(data), max_chunk):
-        chunk = data[i:i + max_chunk]
+        chunk = data[i : i + max_chunk]
         more = 1 if (i + max_chunk) < len(data) else 0
         atoms.append(bytes([more]) + chunk)
 

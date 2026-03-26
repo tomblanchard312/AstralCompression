@@ -1,4 +1,5 @@
 """Tests for astral/codec.py - pack_message / unpack_stream."""
+
 import random
 import pytest
 from astral.codec import (
@@ -8,7 +9,6 @@ from astral.codec import (
     pack_text_message,
     unpack_stream,
 )
-
 
 BASE_MSG = {
     "type": "DETECT",
@@ -164,4 +164,4 @@ class TestOptionalPhases:
         wire = tm.encode_frames(astral, scid=42, vcid=0)
         data, stats = tm.decode_frames(wire)
         assert stats["n_crc_errors"] == 0
-        assert data[:len(astral)] == astral
+        assert data[: len(astral)] == astral

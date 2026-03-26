@@ -15,11 +15,11 @@ import struct
 
 # APID assignments: (APID, packet_type) where packet_type 0=TM, 1=TC
 APID_MAP: dict[str, tuple[int, int]] = {
-    "DETECT":    (0x010, 0),
-    "STATUS":    (0x011, 0),
-    "TEXT":      (0x012, 0),
-    "VOICE":     (0x013, 0),
-    "CMD":       (0x100, 1),
+    "DETECT": (0x010, 0),
+    "STATUS": (0x011, 0),
+    "TEXT": (0x012, 0),
+    "VOICE": (0x013, 0),
+    "CMD": (0x100, 1),
     "CMD_BATCH": (0x101, 1),
 }
 
@@ -115,8 +115,7 @@ def wrap(
 
     if len(astral_stream) > 65536:
         raise ValueError(
-            f"astral_stream size {len(astral_stream)} exceeds "
-            f"maximum 65536 bytes"
+            f"astral_stream size {len(astral_stream)} exceeds " f"maximum 65536 bytes"
         )
 
     apid, packet_type = APID_MAP[msg_type]
@@ -162,17 +161,13 @@ def unwrap(packet: bytes) -> dict:
         version bits are not 0b000, or data_length mismatch.
     """
     if not isinstance(packet, bytes) or len(packet) < 6:
-        raise ValueError(
-            "packet must be bytes with len >= 6"
-        )
+        raise ValueError("packet must be bytes with len >= 6")
 
     w1, w2, data_length = struct.unpack(">HHH", packet[:6])
 
     version = (w1 >> 13) & 0x7
     if version != 0b000:
-        raise ValueError(
-            f"packet version must be 0b000, got {version:03b}"
-        )
+        raise ValueError(f"packet version must be 0b000, got {version:03b}")
 
     packet_type = (w1 >> 12) & 0x1
     sec_hdr_flag = (w1 >> 11) & 0x1

@@ -76,9 +76,7 @@ def encode_cmd(
 
     if key:
         counter_bytes = counter.to_bytes(4, "big")
-        mac = hmac.new(
-            key, counter_bytes + bytes(out), hashlib.sha256
-        ).digest()
+        mac = hmac.new(key, counter_bytes + bytes(out), hashlib.sha256).digest()
         out += counter_bytes + mac
     return bytes(out)
 
@@ -132,7 +130,7 @@ def decode_cmd(
     elif name == "UPLOAD_CHUNK":
         seq, pos = leb128_decode(b, pos)
         ln, pos = leb128_decode(b, pos)
-        data = b[pos:pos + ln]
+        data = b[pos : pos + ln]
         pos += ln
         out.update({"seq": seq, "data": data})  # type: ignore
     elif name == "APPLY_UPDATE":
@@ -142,10 +140,8 @@ def decode_cmd(
         if len(b) - pos >= 36:
             counter_bytes = b[-36:-32]
             mac_recv = b[-32:]
-            body = b[:len(b) - 36]
-            mac_expected = hmac.new(
-                key, counter_bytes + body, hashlib.sha256
-            ).digest()
+            body = b[: len(b) - 36]
+            mac_expected = hmac.new(key, counter_bytes + body, hashlib.sha256).digest()
             auth_ok = hmac.compare_digest(mac_expected, mac_recv)
             out["auth_ok"] = auth_ok  # type: ignore
             out["counter"] = int.from_bytes(counter_bytes, "big")  # type: ignore
@@ -201,9 +197,7 @@ def encode_cmd_batch(
         out += body
     if key:
         counter_bytes = counter.to_bytes(4, "big")
-        mac = hmac.new(
-            key, counter_bytes + bytes(out), hashlib.sha256
-        ).digest()
+        mac = hmac.new(key, counter_bytes + bytes(out), hashlib.sha256).digest()
         out += counter_bytes + mac
     return bytes(out)
 
@@ -228,7 +222,7 @@ def decode_cmd_batch(
     for _ in range(n):
         off, pos = leb128_decode(b, pos)
         ln, pos = leb128_decode(b, pos)
-        body = b[pos:pos + ln]
+        body = b[pos : pos + ln]
         pos += ln
         items.append({"tai_offset_s": off, "cmd": decode_cmd(body)})
     out = {
@@ -243,9 +237,7 @@ def decode_cmd_batch(
             counter_bytes = b[-36:-32]
             mac_recv = b[-32:]
             body = b[: len(b) - 36]
-            mac_expected = hmac.new(
-                key, counter_bytes + body, hashlib.sha256
-            ).digest()
+            mac_expected = hmac.new(key, counter_bytes + body, hashlib.sha256).digest()
             auth_ok = hmac.compare_digest(mac_expected, mac_recv)
             out["auth_ok"] = auth_ok  # type: ignore
             out["counter"] = int.from_bytes(counter_bytes, "big")  # type: ignore

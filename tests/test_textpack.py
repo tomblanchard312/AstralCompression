@@ -1,5 +1,6 @@
 """Tests for astral/textpack.py - dictionary-based text compression."""
-from astral.textpack import BASE_LEXICON, decode_text, encode_text
+
+from astral.textpack import decode_text, encode_text
 
 
 class TestEncodeDecodeRoundtrip:
