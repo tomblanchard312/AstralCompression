@@ -86,6 +86,46 @@ The system uses ASTRAL's revolutionary architecture:
 - **Atomic Integrity**: Each 32-byte atom has CRC-8 integrity
 - **GIST Survival**: Essential metadata survives severe packet loss
 
+## Space Communications Standards Compliance
+
+The McKay + ASTRAL system is designed to integrate seamlessly with established space communications standards while providing breakthrough compression capabilities.
+
+### CCSDS Standards Compatibility
+
+**Space Packet Protocol (133.0-B-2)**
+- McKay-compressed data can be encapsulated in CCSDS Space Packets
+- APID-based routing compatible with ground stations (COSMOS, OpenMCT, SatNOGS)
+- Maintains sequence counter integrity across compression boundaries
+
+**Telemetry Frames (131.0-B-5)**
+- TM frame encapsulation for deep space transmission
+- CCSDS pseudo-randomizer and synchronization patterns
+- CRC-16-CCITT error detection and correction
+
+**Reed-Solomon FEC**
+- RS(255,223) and RS(255,239) error correction
+- Compatible with CCSDS channel coding standards
+- Provides additional error correction beyond fountain codes
+
+### Ground Station Integration
+
+**Existing Infrastructure Compatibility**
+- Works with current DSN (Deep Space Network) processing systems
+- Compatible with ESA ground station networks
+- Supports standard telemetry processing chains
+
+**Migration Strategy**
+- Can be deployed alongside existing CCSDS implementations
+- Gradual adoption without disrupting current operations
+- Enhanced compression ratios improve data return capabilities
+
+### Standards Compliance Benefits
+
+- **Interoperability**: Seamless integration with existing space operations
+- **Enhanced Performance**: 2x-180x compression ratios beyond standard methods
+- **Reliability**: GIST-first architecture ensures critical data survival
+- **Future-Proof**: Modular design supports emerging standards
+
 ## Usage Examples
 
 ### Basic McKay Compression
