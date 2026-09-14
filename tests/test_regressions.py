@@ -12,6 +12,7 @@ import math
 import random
 import struct
 import warnings
+import zlib
 
 import pytest
 
@@ -740,3 +741,83 @@ class TestPythonVersionSupport:
         ).read_text(encoding="utf-8")
         # If this is ever raised, the guard above can be relaxed to match.
         assert 'requires-python = ">=3.9"' in pyproject
+
+
+class TestHeaderBoundIntegrity:
+    """
+    The checksum originally covered only the payload. A corrupt HEADER_GIST
+    atom that passed its own CRC-8 could therefore flip the gist type, which
+    selects the decoder, and still report `integrity_ok: True`: an intact TEXT
+    payload came back as a fabricated STATUS report with invented lat/lon.
+    Reported by Codex on PR #5.
+    """
+
+    @staticmethod
+    def _flip_gist_type(stream: bytes, copies=None) -> bytes:
+        from astral.crc import crc8_j1850
+
+        atoms = [bytearray(stream[i : i + 32]) for i in range(0, len(stream), 32)]
+        headers = [a for a in atoms if a[9] == container.HEADER_GIST]
+        for a in headers if copies is None else headers[:copies]:
+            a[21] ^= 0x01  # lowest bit of the gist's type field
+            a[31] = crc8_j1850(bytes(a[:31])) & 0xFF  # atom CRC-8 passes again
+        return b"".join(bytes(a) for a in atoms)
+
+    def test_checksum_covers_the_header(self):
+        payload = b"burn 12.5 s at T+0300"
+        stream = codec.pack_text_message(payload.decode())
+        damaged = self._flip_gist_type(stream)  # every copy
+        result = codec.unpack_stream(damaged)
+        assert result["integrity_ok"] is False
+        assert result["complete"] is False
+        assert result["message"] is None
+
+    def test_one_corrupt_header_copy_is_outvoted(self):
+        text = "burn 12.5 s at T+0300"
+        stream = codec.pack_text_message(text)
+        damaged = self._flip_gist_type(stream, copies=1)
+        result = codec.unpack_stream(damaged)
+        assert result["gist"]["type"] == "TEXT"
+        assert result["complete"] is True
+        assert result["integrity_ok"] is True
+        assert result["message"]["text"] == text
+
+    def test_crc_is_not_a_plain_payload_checksum(self):
+        """The stored value must depend on the header, not the payload alone."""
+        payload = b"some payload bytes"
+        stream = codec.pack_text_message(payload.decode())
+        header = next(
+            a.payload
+            for a in container.parse_atoms(stream)
+            if a.atom_type == container.HEADER_GIST
+        )
+        stored = int.from_bytes(
+            header[codec.PAYLOAD_CRC_OFFSET : codec.PAYLOAD_CRC_OFFSET + 4], "little"
+        )
+        body = b"".join(
+            a.payload[5:21]
+            for a in container.parse_atoms(stream)
+            if a.atom_type == container.FOUNTAIN_PACKET
+        )
+        assert stored != zlib.crc32(body)
+        # It is reproducible from the header and the payload together.
+        assert stored == codec.integrity_crc(header, encode_text(payload.decode()))
+
+    def test_checksum_slot_is_excluded_from_its_own_input(self):
+        header = bytes(range(21))
+        payload = b"abc"
+        a = codec.integrity_crc(header, payload)
+        mutated = bytearray(header)
+        mutated[codec.PAYLOAD_CRC_OFFSET : codec.PAYLOAD_CRC_OFFSET + 4] = b"\xff" * 4
+        assert codec.integrity_crc(bytes(mutated), payload) == a
+
+    def test_integrity_is_none_when_recovery_is_incomplete(self):
+        """`None` means not verified, which includes a partial v2 decode."""
+        stream = codec.pack_text_message("a somewhat longer message to split up")
+        atoms = [stream[i : i + 32] for i in range(0, len(stream), 32)]
+        headers_only = b"".join(
+            a for a in atoms if a[9] != container.FOUNTAIN_PACKET
+        )
+        result = codec.unpack_stream(headers_only)
+        assert result["complete"] is False
+        assert result["integrity_ok"] is None

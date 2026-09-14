@@ -63,7 +63,7 @@ data, corrected, ok = rs_fec.decode_codeblock(block)
 | `recovered_fraction` | share of source blocks solved |
 | `message` | decoded message dict, or `None` |
 | `data` | decompressed bytes (McKay streams only) |
-| `integrity_ok` | payload CRC-32 verified (`None` for a pre-v2 stream) |
+| `integrity_ok` | `True` verified, `False` corrupt, `None` not verified (incomplete recovery, or a pre-v2 stream) |
 
 ## Data types
 

@@ -3,6 +3,16 @@
 ## 2026-09-14 (second pass)
 
 ### Fixed (data integrity)
+- **The integrity checksum covers the header, not just the payload.** The
+  header decides how the payload is read (the gist type selects the decoder),
+  so a corrupt header atom that passed its own CRC-8 could turn an intact TEXT
+  payload into a fabricated STATUS report, complete with invented lat/lon, and
+  still report `integrity_ok: True`. The CRC-32 now spans the header (with its
+  own checksum slot zeroed) and the payload together. Raised by Codex on PR #5.
+- **Replicated headers are chosen by majority vote.** The decoder used
+  whichever copy arrived first, so a single damaged copy decided how the
+  message was read. One corrupt copy is now outvoted and the message decodes
+  normally.
 - **A corrupt atom could be reported as a clean decode.** CRC-8 rejects 255 of
   every 256 corrupt atoms; the one that slips through is XORed into the
   reconstruction, and nothing checked the result. Atom format 2 puts a CRC-32

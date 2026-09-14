@@ -115,19 +115,61 @@ def _check_payload_size(
         )
 
 
+def _majority(candidates):
+    """
+    The most common value among replicated atoms, ties broken by first seen.
+
+    Replication exists so the gist survives loss; it also gives corruption
+    detection for free, because a damaged copy is outvoted by its twins.
+    """
+    if len(candidates) == 1:
+        return candidates[0]
+    counts: dict = {}
+    for value in candidates:
+        counts[value] = counts.get(value, 0) + 1
+    best = max(counts.values())
+    for value in candidates:  # first-seen order among the winners
+        if counts[value] == best:
+            return value
+    return candidates[0]
+
+
+def _normalise_header(header: bytes) -> bytes:
+    """The header with its own checksum slot zeroed, for CRC purposes."""
+    return (
+        header[:PAYLOAD_CRC_OFFSET]
+        + b"\x00\x00\x00\x00"
+        + header[PAYLOAD_CRC_OFFSET + 4 :]
+    )
+
+
+def integrity_crc(header: bytes, payload: bytes) -> int:
+    """
+    The end-to-end checksum: CRC-32 over the header and the payload together.
+
+    Covering the payload alone is not enough. The header carries the fields
+    that decide how the payload is interpreted (the gist type selects the
+    decoder, K and the seed drive reassembly), so a corrupt header atom that
+    happened to pass its own CRC-8 could turn an intact TEXT payload into a
+    fabricated STATUS report while the payload checksum still matched. Binding
+    the two together means any single corruption in either is detected.
+    """
+    return zlib.crc32(payload, zlib.crc32(_normalise_header(header)))
+
+
 def _build_header(
     gist_bytes: bytes,
     gist_bits: int,
     K: int,
     fountain_seed: int,
     payload_len: int,
-    payload_crc: int = 0,
+    payload: bytes = b"",
 ) -> bytes:
     """
     Assemble the 21-byte HEADER_GIST payload shared by every pack_* call.
 
     Layout: K(2) symbol_size(1) seed(4) payload_len(3) gist_bits(1)
-    gist(5) payload_crc32(4), little-endian throughout.
+    gist(5) integrity_crc32(4), little-endian throughout.
     """
     header = bytearray(21)
     header[0] = K & 0xFF
@@ -139,9 +181,8 @@ def _build_header(
     header[9] = (payload_len >> 16) & 0xFF
     header[10] = gist_bits & 0xFF
     header[11 : 11 + min(len(gist_bytes), GIST_ROOM)] = gist_bytes[:GIST_ROOM]
-    header[PAYLOAD_CRC_OFFSET : PAYLOAD_CRC_OFFSET + 4] = (
-        payload_crc & 0xFFFFFFFF
-    ).to_bytes(4, "little")
+    crc = integrity_crc(bytes(header), payload)
+    header[PAYLOAD_CRC_OFFSET : PAYLOAD_CRC_OFFSET + 4] = crc.to_bytes(4, "little")
     return bytes(header)
 
 
@@ -219,7 +260,7 @@ def pack_text_with_dict(
     K = len(blocks)
     fountain_seed = int.from_bytes(os.urandom(4), "little") or 1
     header = _build_header(
-        gist_bytes, gist_bits, K, fountain_seed, len(payload), zlib.crc32(payload)
+        gist_bytes, gist_bits, K, fountain_seed, len(payload), payload
     )
 
     # The header is replicated: if every copy is lost there is no gist and no
@@ -349,7 +390,7 @@ def _pack_with_custom_payload(
     K = len(blocks)
     fountain_seed = int.from_bytes(os.urandom(4), "little") or 1
     header = _build_header(
-        gist_bytes, gist_bits, K, fountain_seed, len(payload), zlib.crc32(payload)
+        gist_bytes, gist_bits, K, fountain_seed, len(payload), payload
     )
 
     M = fountain_atom_count(K, min_redundancy, redundancy, extra_fountain)
@@ -538,8 +579,8 @@ def unpack_stream(stream: bytes):
         return {"error": "no valid atoms"}
 
     msg_id = atoms[0].message_id
-    header_atom = None
-    mckay_atom = None
+    header_candidates = []
+    mckay_candidates = []
     fountain_atoms = []
     dict_atoms = []
     total_atoms = atoms[0].total_atoms
@@ -548,18 +589,24 @@ def unpack_stream(stream: bytes):
         if mid != msg_id:
             continue
         total_atoms = total
-        if typ == HEADER_GIST and header_atom is None:
+        if typ == HEADER_GIST:
             atom_version = version
-            header_atom = payload
+            header_candidates.append(payload)
         elif typ == FOUNTAIN_PACKET:
             fountain_atoms.append(payload)
         elif typ == DICT_UPDATE:
             dict_atoms.append(payload)
-        elif typ == MCKAY_GIST and mckay_atom is None:
-            mckay_atom = payload
+        elif typ == MCKAY_GIST:
+            mckay_candidates.append(payload)
 
-    if header_atom is None:
+    if not header_candidates:
         return {"error": "missing header/gist atom"}
+
+    # The header is replicated, so take the copy the majority agree on rather
+    # than whichever arrived first: one corrupt copy that slipped past its
+    # CRC-8 then loses the vote instead of deciding how the payload is read.
+    header_atom = _majority(header_candidates)
+    mckay_atom = _majority(mckay_candidates) if mckay_candidates else None
 
     K = header_atom[0] | (header_atom[1] << 8)
     symbol_size = header_atom[2]
@@ -600,7 +647,7 @@ def unpack_stream(stream: bytes):
         if recovered is not None:
             payload = b"".join(recovered)[:payload_len]
             if expected_crc is not None:
-                integrity = zlib.crc32(payload) == expected_crc
+                integrity = integrity_crc(header_atom, payload) == expected_crc
                 if not integrity:
                     # The blocks solved, but they do not reconstruct the payload
                     # that was sent. Reporting this as a decode would hand the
@@ -617,9 +664,9 @@ def unpack_stream(stream: bytes):
                         "data": None,
                         "integrity_ok": False,
                         "error": (
-                            "payload integrity check failed: the atoms "
-                            "reassembled but the CRC-32 does not match the "
-                            "header. At least one atom was corrupt."
+                            "integrity check failed: the atoms reassembled "
+                            "but the CRC-32 over the header and payload does "
+                            "not match. At least one atom was corrupt."
                         ),
                     }
             try:

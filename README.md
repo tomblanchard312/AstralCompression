@@ -176,7 +176,7 @@ An atom is 32 bytes:
 | Bytes | Field |
 |---|---|
 | 0-1 | sync `0xA5 0xE6` |
-| 2 | atom format version (2: header carries a payload CRC-32) |
+| 2 | atom format version (2: header carries the integrity CRC-32) |
 | 3-4 | atom_index (uint16 LE) |
 | 5-6 | total_atoms (uint16 LE) |
 | 7-8 | message_id (uint16 LE) |
@@ -185,8 +185,8 @@ An atom is 32 bytes:
 | 31 | CRC-8/J1850 over bytes 0-30 |
 
 - **HEADER_GIST** carries source block count K, symbol size (16), payload
-  length, fountain seed, the packed gist bits, and a CRC-32 of the assembled
-  payload. It is replicated; see `header_redundancy_for`.
+  length, fountain seed, the packed gist bits, and a CRC-32 over the header
+  and payload together. It is replicated; see `header_redundancy_for`.
 - **MCKAY_GIST** carries the McKay version, transform, data type, original and
   compressed sizes, channel count and entropy coder. Also replicated.
 - **FOUNTAIN_PACKET** carries a packet seed, degree and a 16-byte XOR block.
@@ -201,13 +201,33 @@ input raises rather than wrapping.
 
 Each atom carries a CRC-8, which rejects 255 of every 256 corrupt atoms. The
 one that slips through is XORed into the reconstruction and silently changes
-the payload, so the header also carries a CRC-32 over the assembled payload
-and the decoder checks it before reporting success:
+what the receiver ends up with, so the header carries a CRC-32 covering **the
+header and the payload together**, checked before any decode is reported:
 
 ```python
 result = unpack_stream(stream)
-result["integrity_ok"]   # True, False, or None for a pre-v2 stream
+result["integrity_ok"]   # True | False | None
 ```
+
+| Value | Meaning |
+|---|---|
+| `True` | header and payload both verified against the checksum |
+| `False` | they reassembled but do not match: at least one atom was corrupt |
+| `None` | **not verified**: recovery was incomplete, or the stream predates atom format 2 |
+
+`None` is not a format-version indicator. A v2 stream that recovers only some
+of its fountain blocks also reports `None`, because there is nothing complete
+to check yet.
+
+The checksum covers the header because the header decides how the payload is
+read: the gist type selects the decoder, and K and the seed drive reassembly.
+Covering the payload alone left a gap where a corrupt header atom that passed
+its own CRC-8 could turn an intact TEXT payload into a fabricated STATUS
+report while the payload checksum still matched.
+
+Header atoms are replicated, so the decoder takes the copy the majority agree
+on. One corrupt copy is outvoted and the message decodes normally; only if
+every copy is damaged the same way does the checksum fail.
 
 A failed check is reported as `complete: False` with an `error`, never as a
 decode. The gist still comes back, so an operator learns what was sent and
@@ -337,7 +357,7 @@ reports per-dataset timings, ratios and an average speedup.
 
 ```bash
 pip install pytest reedsolo numpy
-python -m pytest tests            # 190 passed, 19 skipped without the Rust extension
+python -m pytest tests            # 197 passed, 19 skipped without the Rust extension
 python -m flake8 astral/ tests/ *.py --config=setup.cfg
 ```
 
