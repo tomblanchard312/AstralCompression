@@ -1,5 +1,88 @@
 # Changelog
 
+## 2026-09-14
+
+### Fixed (data integrity)
+- **McKay streams over 64 KiB no longer decode to corrupt output.** The
+  original-length field was 16 bits, so TELEMETRY and BINARY payloads of 65535
+  bytes or more came back truncated with no error (160,000 bytes in, 65,532
+  out). The field is now 32 bits (format v3) and every reconstruction is
+  length-checked. v2 streams still decode; v2 streams whose length was
+  truncated when written now raise instead of returning junk.
+- **The Rust fast path is no longer selected against a stub.** The un-built
+  `astral_compress/` source directory imports as an empty namespace package,
+  so `_RUST_AVAILABLE` was always True and every compression call took an
+  exception-driven fallback. Availability now requires a real entry point.
+- **The CCSDS pseudo-randomizer generates the correct sequence.** It produced
+  `FF 1A AF 66 ...`; the published CCSDS 131.0-B-5 sequence is
+  `FF 48 0E C0 9A 0D 70 BC`. Frames randomised by the old code could not be
+  derandomised by any conforming ground station.
+- **Randomisation now covers the whole transfer frame**, header and FECF
+  included, as CCSDS 131.0-B-5 requires. Only the ASM is left in the clear.
+- **TM frames declare their data field honestly.** Every frame previously
+  claimed segment length ID `11` with First Header Pointer 0x7FF, telling
+  parsers that no packet ever starts. Opaque ASTRAL streams now use VCA
+  framing (sync flag 1); the new `MODE_PACKET` carries real Space Packets with
+  a correct First Header Pointer and idle-packet fill.
+- **`astral.cli wrap-sp` wraps its input.** It was discarding the file it read
+  and packing a fresh, near-empty message instead.
+- **Text payloads roundtrip exactly.** Capitalisation and whitespace were
+  being discarded ("Hello world" decoded as "hello world"). Payload format v2
+  adds case tags and explicit gap records; v1 payloads still decode.
+
+### Fixed (robustness)
+- The fountain decoder runs Gaussian elimination over GF(2) after peeling.
+  Recovery overhead at K=200 fell from 1.42x to 1.01x, and decodes that
+  previously stalled with ample packets now succeed.
+- Atom parsing scans for the sync word instead of assuming 32-byte alignment,
+  so a stream that starts mid-atom or has byte-level gaps still decodes.
+- TM deframing likewise searches for the ASM rather than stepping blindly.
+- Payload size limits are checked against the real 16-bit atom counter budget
+  instead of a 24-bit field that could not be reached.
+- Ragged TELEMETRY input is rejected with an explanatory error rather than
+  silently truncated.
+
+### Added
+- `codec.pack_mckay_message` / `unpack_mckay_stream`: McKay compression
+  carried over the fountain/atom layer with a replicated `MCKAY_GIST` atom.
+  This is the McKay + ASTRAL integration the documentation described; no code
+  previously connected the two.
+- `codec.header_redundancy_for(loss_rate)` and a `header_redundancy` argument
+  on every pack function, so gist survival can be sized for the link.
+- A `redundancy` argument (and `codec.fountain_atom_count`) giving proportional
+  control of fountain overhead. The old formula pinned it at 100% with no way
+  down, even though the improved decoder recovers large messages from about 5%.
+  The default is unchanged.
+- `rs_fec.encode_codeblock` / `decode_codeblock` / `encode_codeblocks`:
+  genuine CCSDS RS(255,223) and RS(255,239) with symbol interleaving. The
+  previous "RS(255,223)" claim referred to per-atom RS(48,32)/RS(64,32) codes,
+  which remain available under their own names.
+- `tmframe.frame_info`, `tmframe.split_space_packets`, `MODE_PACKET`.
+- `spacepacket.SpacePacketSequenceCounter.set`.
+- CLI: `pack-mckay`, `unpack-mckay`, `frame-tm --mode`, `simulate --seed`.
+- `tests/test_regressions.py`, 69 tests pinning every defect above.
+
+### Changed
+- `mckay_vs_standard.py` rewritten: it previously printed literal format
+  specifiers (`print(".3f")`) instead of numbers, so its published figures were
+  not reproducible. It now verifies every reconstruction before reporting a
+  ratio. The same defect in the two Rust benchmarks is repaired.
+- `astral/mckay_usage_example.py` rewritten against the real API; it called
+  `get_compression_stats()` and `get_integration_stats()`, which do not exist,
+  and crashed on the first example.
+- README rewritten so every performance and compliance claim matches measured
+  behaviour in this repository.
+- `stats()` reports the whole stream size, not just the payload.
+- Verification and benchmark scripts force UTF-8 output, fixing
+  `UnicodeEncodeError` crashes on a default Windows console.
+- flake8 configuration consolidated into `setup.cfg`; the exclusions that hid
+  `mckay_astral_integration.py` and the examples from linting are gone, and CI
+  lints tests and scripts too.
+- CI asserts the Rust extension is actually exercised and runs the standards
+  verification scripts.
+- `act.exe`, `act.zip` and `act-tool/` (about 44 MB) untracked and ignored.
+  They remain in git history; removing them needs a history rewrite.
+
 ## 2026-03-24
 
 ### Fixed

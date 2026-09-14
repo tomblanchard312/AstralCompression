@@ -30,7 +30,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest flake8 reedsolo maturin zstd numpy
+          pip install pytest flake8 reedsolo maturin zstd zstandard numpy
 
       - name: Build and install Rust extension
         run: |
@@ -39,9 +39,30 @@ jobs:
           pip install ../dist/*.whl
 
       - name: Lint with flake8
-        run: flake8 astral/ --config=setup.cfg
+        run: flake8 astral/ tests/ *.py --config=setup.cfg
 
       - name: Run tests
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: pytest tests/ -v --tb=short --ignore=tests/test_rust_compress_old.py
+
+      - name: Verify the Rust extension is actually exercised
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -c "
+          import astral_compress as ac
+          from astral import mckay_astral_integration as mk
+          assert hasattr(ac, 'compress_text'), 'extension built but not importable'
+          assert mk._RUST_AVAILABLE, 'Rust fast path not selected'
+          print('Rust extension active')
+          "
+
+      - name: Run standards verification scripts
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python PHASE3_SPACEPACKET_VERIFICATION.py
+          python PHASE4_RS_VERIFICATION.py
+          python PHASE5_TM_VERIFICATION.py
+          python -m astral.mckay_usage_example

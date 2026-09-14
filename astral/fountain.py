@@ -165,6 +165,63 @@ def lt_encode_blocks(blocks, seed, num_packets, c=0.1, delta=0.05):
     return packets
 
 
+def _xor_into(dst: bytearray, src) -> None:
+    for i in range(len(dst)):
+        dst[i] ^= src[i]
+
+
+def _gaussian_eliminate(equations, solved: dict, symbol_size: int) -> None:
+    """
+    Solve the residual system left by peeling, in place, over GF(2).
+
+    Each equation is ``(set_of_block_indices, data)``. Equations are reduced
+    against a pivot set keyed by their lowest remaining index; anything that
+    reduces to the empty set is redundant and dropped. Back substitution then
+    runs from the highest pivot down, which is safe because a pivot is by
+    construction the smallest index in its own equation.
+
+    Newly recovered blocks are added to ``solved``.
+    """
+    pivots: dict = {}
+
+    for indices, data in equations:
+        cur = set(indices)
+        cur_data = bytearray(data)
+
+        # Fold in everything peeling already recovered.
+        for idx in list(cur):
+            if idx in solved:
+                cur.discard(idx)
+                _xor_into(cur_data, solved[idx])
+
+        while cur:
+            p = min(cur)
+            pivot = pivots.get(p)
+            if pivot is None:
+                pivots[p] = (cur, cur_data)
+                break
+            p_indices, p_data = pivot
+            cur ^= p_indices
+            _xor_into(cur_data, p_data)
+        # An empty `cur` means the packet was linearly dependent: no new
+        # information, nothing to record.
+
+    for p in sorted(pivots, reverse=True):
+        p_indices, p_data = pivots[p]
+        value = bytearray(p_data)
+        resolvable = True
+        for idx in p_indices:
+            if idx == p:
+                continue
+            known = solved.get(idx)
+            if known is None:
+                resolvable = False
+                break
+            _xor_into(value, known)
+        if resolvable and p not in solved:
+            solved[p] = bytes(value[:symbol_size])
+
+
 def lt_decode_blocks(packets, K, symbol_size, c=0.1, delta=0.05):
     if not packets:
         return None, 0.0
@@ -193,8 +250,8 @@ def lt_decode_blocks(packets, K, symbol_size, c=0.1, delta=0.05):
 
         equations.append((set(indices), bytearray(data)))
 
-    # Gaussian elimination
-    solved = {}
+    # Stage 1: belief-propagation peeling. Cheap, and resolves the common case.
+    solved: dict = {}
 
     while True:
         progress = False
@@ -214,6 +271,12 @@ def lt_decode_blocks(packets, K, symbol_size, c=0.1, delta=0.05):
 
         if not progress:
             break
+
+    # Stage 2: full Gaussian elimination over GF(2) on whatever peeling left
+    # behind. Peeling alone stalls whenever the residual graph has no degree-1
+    # equation, which wastes packets that are in fact linearly independent.
+    if len(solved) < K:
+        _gaussian_eliminate(equations, solved, symbol_size)
 
     # Prepare result
     decoded_blocks = [None] * K

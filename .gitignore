@@ -127,3 +127,8 @@ test_*.wav
 *.test_output
 debug_*.py
 temp_*
+
+# Local tooling binaries (act runner); never commit these
+act.exe
+act.zip
+act-tool/

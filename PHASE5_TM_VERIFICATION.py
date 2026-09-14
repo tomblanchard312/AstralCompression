@@ -1,3 +1,11 @@
+import sys
+
+# Windows consoles default to a legacy code page; these scripts print check
+# marks, so force UTF-8 rather than dying with UnicodeEncodeError mid-report.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import math
 import struct
 
@@ -8,18 +16,22 @@ from astral.codec import (
     unpack_frames_tm,
     unpack_stream,
 )
+from astral.spacepacket import SpacePacketSequenceCounter, wrap as sp_wrap
 from astral.tmframe import (
     ASM,
     FECF_SIZE,
+    FHP_IDLE_DATA,
     FILL_BYTE,
     FRAME_DATA_SIZE,
     FRAME_HEADER_SIZE,
     FRAME_SIZE,
+    MODE_PACKET,
     WIRE_FRAME_SIZE,
     TmFrameCounter,
     apply_prng,
     decode_frames,
     encode_frames,
+    frame_info,
     make_idle_frame,
 )
 
@@ -33,9 +45,9 @@ assert WIRE_FRAME_SIZE == 1119
 assert FILL_BYTE == 0xE0
 assert FRAME_SIZE == FRAME_HEADER_SIZE + FRAME_DATA_SIZE + FECF_SIZE
 
-# 2. PRNG test vector (CCSDS-mandated)
+# 2. PRNG test vector (CCSDS 131.0-B-5 published sequence)
 prng_out = apply_prng(bytes(8))
-expected = bytes([0xFF, 0x1A, 0xAF, 0x66, 0x52, 0x23, 0x1E, 0x10])
+expected = bytes([0xFF, 0x48, 0x0E, 0xC0, 0x9A, 0x0D, 0x70, 0xBC])
 assert prng_out == expected, f"PRNG test vector failed: {prng_out.hex()}"
 
 # 3. PRNG is self-inverse
@@ -98,8 +110,10 @@ assert (word1 >> 4) & 0x3FF == 0x2A, "SCID wrong"
 assert (word1 >> 1) & 0x7 == 3, "VCID wrong"
 assert (word1 >> 14) & 0x3 == 0, "TFVN must be 0"
 assert mc == 0 and vc == 0, "first frame counts must be 0"
-assert (word3 >> 11) & 0x3 == 0b11, "seg_len_id must be 0b11"
-assert word3 & 0x7FF == 0x7FF, "FHP must be 0x7FF"
+# Default mode is VCA: the data field is an opaque SDU, so the sync flag is
+# set and the packet-oriented fields are undefined (zeroed).
+assert (word3 >> 14) & 1 == 1, "VCA mode must set the sync flag"
+assert word3 & 0x3FFF == 0, "undefined fields must be zeroed in VCA mode"
 # Check FECF (last 2 bytes, randomise=False)
 hdr_bytes = frame[:FRAME_HEADER_SIZE]
 data_bytes = frame[FRAME_HEADER_SIZE : FRAME_HEADER_SIZE + FRAME_DATA_SIZE]
@@ -108,7 +122,8 @@ expected_crc = crc16_ccitt(hdr_bytes + data_bytes)
 actual_crc = struct.unpack(">H", fecf_bytes)[0]
 assert expected_crc == actual_crc, "FECF CRC wrong"
 
-# 8. Randomisation: header NOT randomised, data+FECF IS randomised
+# 8. Randomisation covers the ENTIRE transfer frame (CCSDS 131.0-B-5 9.2):
+#    header, data field and FECF. Only the ASM is left in the clear.
 c5 = TmFrameCounter()
 data_pattern = bytes(range(256)) * (FRAME_DATA_SIZE // 256 + 1)
 data_pattern = data_pattern[:FRAME_DATA_SIZE]
@@ -116,10 +131,11 @@ wire_rnd = encode_frames(data_pattern, scid=1, vcid=0, counter=c5, randomise=Tru
 wire_clr = encode_frames(
     data_pattern, scid=1, vcid=0, counter=TmFrameCounter(), randomise=False
 )
-# Headers (bytes 4-9) must be identical (not randomised)
-assert wire_rnd[4:10] == wire_clr[4:10], "header must not be randomised"
-# Data fields must differ (randomised vs clear)
+assert wire_rnd[:4] == ASM and wire_clr[:4] == ASM, "ASM is never randomised"
+assert wire_rnd[4:10] != wire_clr[4:10], "header must be randomised"
 assert wire_rnd[10:] != wire_clr[10:], "data field must be randomised"
+# De-randomising must give back exactly the clear frame.
+assert apply_prng(wire_rnd[4:]) == wire_clr[4:], "randomiser must be reversible"
 
 # 9. Clean encode/decode roundtrip
 payload = bytes(range(200)) + b"ASTRAL test payload"
@@ -153,6 +169,26 @@ assert stats_big["n_frames"] == 3
 assert stats_big["n_crc_errors"] == 0
 assert data_big[: len(big_payload)] == big_payload
 
+# 12b. VCA mode (the default) marks the data field as an opaque SDU
+vca_wire = encode_frames(bytes(100), scid=1, vcid=0, randomise=False)
+vca_status = struct.unpack(">H", vca_wire[4 + 4 : 4 + 6])[0]
+assert (vca_status >> 14) & 1 == 1, "VCA mode must set the sync flag"
+
+# 12c. Packet mode carries real Space Packets with a usable First Header Pointer
+sp_counter = SpacePacketSequenceCounter()
+sp_stream = b"".join(
+    sp_wrap(pack_message(
+        {"type": "DETECT", "object": "H2O_ICE"}, extra_fountain=2
+    ), "DETECT", sp_counter)
+    for _ in range(3)
+)
+pkt_wire = encode_frames(sp_stream, scid=1, vcid=0, mode=MODE_PACKET)
+pkt_info = frame_info(pkt_wire)
+assert all(i["sync_flag"] == 0 for i in pkt_info), "packet mode clears the sync flag"
+assert pkt_info[0]["first_header_pointer"] == 0, "first packet starts at offset 0"
+pkt_data, _ = decode_frames(pkt_wire)
+assert pkt_data[: len(sp_stream)] == sp_stream, "packet stream must survive framing"
+
 # 13. Idle frame
 idle = make_idle_frame(scid=42, vcid=0)
 assert len(idle) == WIRE_FRAME_SIZE, f"idle frame must be {WIRE_FRAME_SIZE} bytes"
@@ -161,6 +197,8 @@ assert idle_stats["n_frames"] == 1
 assert idle_stats["n_crc_errors"] == 0
 # Data field should be all FILL_BYTE (after de-randomisation)
 assert all(b == FILL_BYTE for b in idle_data), "idle data field must be FILL_BYTE"
+idle_status = struct.unpack(">H", apply_prng(idle[4:])[4:6])[0]
+assert idle_status & 0x7FF == FHP_IDLE_DATA, "idle frame must flag idle data"
 
 # 14. pack_message_tm / unpack_frames_tm end-to-end
 msg = {

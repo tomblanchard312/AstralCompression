@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
 """Verification script for all bug fixes."""
+import sys
+
+# Windows consoles default to a legacy code page; these scripts print check
+# marks, so force UTF-8 rather than dying with UnicodeEncodeError mid-report.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 
 import sys
 

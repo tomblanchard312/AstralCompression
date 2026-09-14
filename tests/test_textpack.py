@@ -5,7 +5,7 @@ from astral.textpack import decode_text, encode_text
 
 class TestEncodeDecodeRoundtrip:
     def test_all_dict_words(self):
-        """All-dictionary text: decoded lowercase, spaces preserved."""
+        """All-dictionary text roundtrips exactly."""
         text = "the data link is nominal"
         assert decode_text(encode_text(text)) == text
 
@@ -30,12 +30,15 @@ class TestEncodeDecodeRoundtrip:
     def test_empty_string(self):
         assert decode_text(encode_text("")) == ""
 
-    def test_mixed_case_dict_word_lowercased(self):
-        """Dict words are stored and returned lowercase - this is by design."""
-        text = "Hello world"
-        result = decode_text(encode_text(text))
-        assert "hello" in result
-        assert "world" in result
+    def test_case_is_preserved(self):
+        """Capitalisation of dictionary words survives the roundtrip."""
+        for text in ("Hello world", "THE DATA link", "Nominal status"):
+            assert decode_text(encode_text(text)) == text
+
+    def test_mixed_case_dict_word_preserved(self):
+        """A word whose case does not fit a flag goes out as a literal."""
+        text = "hELLo world"
+        assert decode_text(encode_text(text)) == text
 
     def test_encode_returns_bytes(self):
         assert isinstance(encode_text("hello"), bytes)

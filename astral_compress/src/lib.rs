@@ -4,7 +4,7 @@ use pyo3::types::PyBytes;
 use pyo3::Py;
 use zstd;
 
-/// Compress telemetry data using Q16 quantization and delta encoding with zstd compression
+/// Compress telemetry data using Q12 quantization and delta encoding with zstd compression
 #[pyfunction]
 #[pyo3(signature = (data, channels))]
 fn compress_telemetry(py: Python, data: &[u8], channels: usize) -> PyResult<Py<PyBytes>> {

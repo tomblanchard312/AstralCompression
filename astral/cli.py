@@ -1,22 +1,41 @@
 import argparse
 import json
+import sys
 from .codec import (
+    header_redundancy_for,
     pack_message,
+    pack_mckay_message,
+    unpack_mckay_stream,
     unpack_stream,
     pack_text_message,
     pack_voice_message,
     pack_cmd_message,
     pack_text_with_dict,
     pack_cmd_batch,
-    pack_message_sp,
     unpack_stream_sp,
     unpack_frames_tm,
 )
 from .spacepacket import (
     SpacePacketSequenceCounter,
     APID_MAP,
+    wrap as sp_wrap,
 )
 from .voice import decode_bitstream_to_wav
+
+
+def jsonable(value):
+    """Make a decode result printable: bytes become hex, recursively."""
+    if isinstance(value, bytes):
+        return value.hex()
+    if isinstance(value, dict):
+        return {k: jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [jsonable(v) for v in value]
+    return value
+
+
+def print_json(value) -> None:
+    print(json.dumps(jsonable(value), indent=2))
 
 
 def read_json(path):
@@ -65,7 +84,7 @@ def cmd_unpack(args):
     try:
         stream = read_bin(args.input)
         result = unpack_stream(stream)
-        print(json.dumps(result, indent=2))
+        print_json(result)
     except Exception as e:
         print(f"Error unpacking stream: {e}")
         return 1
@@ -79,11 +98,12 @@ def cmd_simulate(args):
         out = bytearray()
         import random
 
+        rng = random.Random(args.seed)
         for i in range(0, len(data), atom_size):
             atom = data[i : i + atom_size]
             if len(atom) < atom_size:
                 break
-            if random.random() >= args.drop:
+            if rng.random() >= args.drop:
                 out += atom
         write_bin(args.output, bytes(out))
         print(
@@ -147,11 +167,11 @@ def cmd_unpack_voice(args):
     try:
         result = unpack_stream(read_bin(args.input))
         if not result.get("complete"):
-            print(json.dumps({"error": "incomplete", "gist": result.get("gist", {})}))
+            print_json({"error": "incomplete", "gist": result.get("gist", {})})
             return 0
         msg = result.get("message")
         if not isinstance(msg, dict) or msg.get("type") != "VOICE":
-            print(json.dumps(result, indent=2))
+            print_json(result)
             return 0
         data = msg.get("bytes", b"")
         decode_bitstream_to_wav(data, args.output)
@@ -194,6 +214,52 @@ def cmd_pack_cmd_batch(args):
     return 0
 
 
+def cmd_pack_mckay(args):
+    """Compress a file with McKay and send it as gist-first atoms."""
+    try:
+        data = read_bin(args.input)
+        hr = args.header_redundancy
+        if hr is None and args.survive_loss is not None:
+            hr = header_redundancy_for(args.survive_loss)
+        blob = pack_mckay_message(
+            data,
+            data_type=args.type,
+            extra_fountain=args.extra,
+            channels=args.channels,
+            min_redundancy=args.min_redundancy,
+            redundancy=args.redundancy,
+            header_redundancy=hr,
+        )
+        write_bin(args.output, blob)
+        ratio = len(data) / len(blob) if blob else 0.0
+        print(
+            f"Wrote {len(blob)} bytes to {args.output} "
+            f"({len(blob)//32} atoms). TYPE=MCKAY/{args.type} "
+            f"source={len(data)} bytes, wire ratio={ratio:.2f}x"
+        )
+    except Exception as e:
+        print(f"Error packing McKay message: {e}")
+        return 1
+    return 0
+
+
+def cmd_unpack_mckay(args):
+    """Decode a McKay atom stream, writing the recovered bytes out."""
+    try:
+        result = unpack_mckay_stream(read_bin(args.input))
+        data = result.get("data")
+        if data is not None and args.output:
+            write_bin(args.output, data)
+            print(f"Recovered {len(data)} bytes to {args.output}")
+        summary = {k: v for k, v in result.items() if k != "data"}
+        summary["recovered_bytes"] = len(data) if data is not None else 0
+        print_json(summary)
+    except Exception as e:
+        print(f"Error unpacking McKay stream: {e}")
+        return 1
+    return 0
+
+
 def cmd_wrap_sp(args):
     try:
         astral_stream = read_bin(args.input)
@@ -207,11 +273,10 @@ def cmd_wrap_sp(args):
         counter = SpacePacketSequenceCounter()
         apid = APID_MAP[args.msg_type][0]
         if args.seq_count is not None:
-            counter._counts[apid] = args.seq_count % 16384
-        packet = pack_message_sp(
-            {"type": args.msg_type, "data": astral_stream},
-            counter,
-        )
+            counter.set(apid, args.seq_count)
+        # Wrap the stream that was read, rather than packing a new message:
+        # this subcommand is a framing step, not an encoder.
+        packet = sp_wrap(astral_stream, args.msg_type, counter)
         write_bin(args.output, packet)
         print(
             f"Wrapped {len(astral_stream)} bytes into Space Packet "
@@ -230,7 +295,7 @@ def cmd_unwrap_sp(args):
         if "error" in result:
             print(f"Error: {result['error']}")
             return 1
-        print(json.dumps(result, indent=2))
+        print_json(result)
     except Exception as e:
         print(f"Error unwrapping Space Packet: {e}")
         return 1
@@ -281,7 +346,7 @@ def cmd_decode_rs(args):
             "uncorrectable_atoms": n_uncorrectable,
             "codeword_size": CODEWORD_SIZE[args.e],
         }
-        print(json.dumps(stats, indent=2))
+        print_json(stats)
     except Exception as exc:
         print(f"Error decoding RS stream: {exc}")
         return 1
@@ -301,6 +366,7 @@ def cmd_frame_tm(args):
             vcid=args.vcid,
             counter=counter,
             randomise=not args.no_randomise,
+            mode=args.mode,
         )
         write_bin(args.output, wire)
         n_frames = len(wire) // WIRE_FRAME_SIZE
@@ -320,13 +386,7 @@ def cmd_deframe_tm(args):
         wire = read_bin(args.input)
         result = unpack_frames_tm(wire, randomise=not args.no_randomise)
 
-        # bytes fields are not JSON-serialisable
-        if isinstance(result.get("message"), dict):
-            msg = result["message"]
-            if "bytes" in msg and isinstance(msg["bytes"], bytes):
-                msg["bytes"] = msg["bytes"].hex()
-
-        print(json.dumps(result, indent=2))
+        print_json(result)
     except Exception as exc:
         print(f"Error deframing TM stream: {exc}")
         return 1
@@ -363,7 +423,72 @@ def main(argv=None):
         default=0.3,
         help="probability to drop each atom [0..1]",
     )
+    p_sim.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="RNG seed, for a reproducible loss pattern",
+    )
     p_sim.set_defaults(func=cmd_simulate)
+
+    p_pack_mckay = sub.add_parser(
+        "pack-mckay",
+        help="compress a file with McKay and pack it as gist-first atoms",
+    )
+    p_pack_mckay.add_argument("input", help="file to compress and transmit")
+    p_pack_mckay.add_argument("output", help="ASTRAL atom stream output")
+    p_pack_mckay.add_argument(
+        "--type",
+        default="AUTO",
+        choices=["AUTO", "TEXT", "TELEMETRY", "VOICE", "BINARY", "IMAGE"],
+        help="data type hint for the compressor (default: AUTO)",
+    )
+    p_pack_mckay.add_argument("--extra", type=int, default=0)
+    p_pack_mckay.add_argument(
+        "--channels",
+        type=int,
+        default=0,
+        help="TELEMETRY channel count (0 = auto-detect)",
+    )
+    p_pack_mckay.add_argument(
+        "--redundancy",
+        type=float,
+        default=1.0,
+        help=(
+            "proportional fountain overhead: 1.0 (default) doubles the "
+            "compressed payload, 0.3 sends 30%% extra"
+        ),
+    )
+    p_pack_mckay.add_argument(
+        "--min-redundancy",
+        type=int,
+        default=10,
+        help=(
+            "floor on fountain atoms; the encoder sends "
+            "K + max(min_redundancy, K) + extra, so the default doubles the "
+            "compressed payload"
+        ),
+    )
+    p_pack_mckay.add_argument(
+        "--header-redundancy",
+        type=int,
+        default=None,
+        help="copies of the gist/header atoms (default: scaled with size)",
+    )
+    p_pack_mckay.add_argument(
+        "--survive-loss",
+        type=float,
+        default=None,
+        help="pick header redundancy that keeps the gist at this loss rate",
+    )
+    p_pack_mckay.set_defaults(func=cmd_pack_mckay)
+
+    p_unpack_mckay = sub.add_parser(
+        "unpack-mckay", help="decode a McKay atom stream back to the source file"
+    )
+    p_unpack_mckay.add_argument("input")
+    p_unpack_mckay.add_argument("output", nargs="?", default=None)
+    p_unpack_mckay.set_defaults(func=cmd_unpack_mckay)
 
     p_wrap_sp = sub.add_parser(
         "wrap-sp", help="wrap ASTRAL binary in CCSDS Space Packet"
@@ -436,6 +561,12 @@ def main(argv=None):
         type=int,
         default=0,
         help="Virtual Channel ID 0-7 (default: 0)",
+    )
+    p_frame_tm.add_argument(
+        "--mode",
+        default="VCA",
+        choices=["VCA", "PACKET"],
+        help="data field contents: opaque SDU (VCA) or CCSDS Space Packets",
     )
     p_frame_tm.add_argument(
         "--no-randomise",
@@ -515,4 +646,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    exit(main())
+    sys.exit(main())

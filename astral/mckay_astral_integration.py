@@ -1,4 +1,4 @@
-"""McKay v2 domain-aware compression engine for deep-space links."""
+"""McKay domain-aware compression engine for deep-space links (format v3)."""
 
 from __future__ import annotations
 
@@ -8,9 +8,8 @@ import re
 import struct
 import warnings
 import zlib
-from typing import Dict
 
-MCKAY_VERSION: int = 2
+MCKAY_VERSION: int = 3
 
 TRANSFORM_PASSTHROUGH = 0x00
 TRANSFORM_TEXT = 0x01
@@ -21,9 +20,15 @@ TRANSFORM_BINARY_FLOAT = 0x04
 ENTROPY_LZMA = 0x00
 ENTROPY_ZLIB = 0x01
 ENTROPY_ZSTD = 0x02
+ENTROPY_NONE = 0xFF
 
-HEADER_SIZE = 8
+# v3 header: MAGIC(2) version(1) transform(1) orig_len(4, LE) channels(1) entropy(1)
+HEADER_SIZE = 10
+# v2 header was identical except orig_len was 2 bytes, capping the recoverable
+# original length at 65535 and silently truncating anything larger.
+HEADER_SIZE_V2 = 8
 MAGIC = b"MK"
+MAX_ORIGINAL_SIZE = 0xFFFFFFFF
 
 MISSION_ABBREVS: dict[str, str] = {
     "nominal": "NOM",
@@ -59,8 +64,11 @@ _ID_TO_ABBREV = {idx: word for word, idx in _ABBREV_TO_ID.items()}
 try:
     import astral_compress as _ac
 
-    _RUST_AVAILABLE = True
+    # A namespace package (the un-built source directory) imports fine but
+    # exposes nothing. Require at least one real entry point.
+    _RUST_AVAILABLE = hasattr(_ac, "compress_text")
 except ImportError:
+    _ac = None  # type: ignore[assignment]
     _RUST_AVAILABLE = False
 
 
@@ -70,6 +78,27 @@ def _pack_u16(v: int) -> bytes:
 
 def _unpack_u16(b: bytes) -> int:
     return b[0] | (b[1] << 8)
+
+
+def _pack_u32(v: int) -> bytes:
+    return struct.pack("<I", v)
+
+
+def _unpack_u32(b: bytes) -> int:
+    return struct.unpack("<I", b)[0]
+
+
+def _rust_has(name: str) -> bool:
+    """
+    True only when the compiled extension really exposes ``name``.
+
+    Importability is not enough: the repository root contains an
+    ``astral_compress/`` source directory with no ``__init__.py``, so a plain
+    ``import astral_compress`` succeeds as an empty namespace package whenever
+    the wheel has not been built. Checking for the attribute keeps the Rust
+    fast path from being selected against a stub.
+    """
+    return _RUST_AVAILABLE and hasattr(_ac, name)
 
 
 def _detect_type(data: bytes) -> str:
@@ -97,7 +126,7 @@ def _detect_type(data: bytes) -> str:
 
 def _compress_text(data: bytes) -> tuple[int, int, bytes]:
     """Returns (transform_id, entropy_coder, payload_bytes)."""
-    if _RUST_AVAILABLE:
+    if _rust_has("compress_text"):
         try:
             return TRANSFORM_TEXT, ENTROPY_ZSTD, _ac.compress_text(data)
         except Exception:
@@ -152,7 +181,7 @@ def _text_abbrev_encode(data: bytes) -> bytes:
 
 
 def _text_abbrev_decode(data: bytes) -> bytes:
-    if _RUST_AVAILABLE:
+    if _rust_has("decompress_text"):
         try:
             return _ac.decompress_text(data)
         except Exception:
@@ -202,9 +231,33 @@ def _auto_detect_channels(data: bytes) -> int:
     return best_ch
 
 
+def _validate_telemetry_shape(data: bytes, channels: int) -> None:
+    """
+    Telemetry is a big-endian float32 matrix of whole samples.
+
+    Anything ragged used to be silently truncated at compression time and came
+    back short, so reject it up front with a message that says what to fix.
+    """
+    if channels < 1:
+        raise ValueError(f"channels must be >= 1, got {channels}")
+    if len(data) % 4 != 0:
+        raise ValueError(
+            f"TELEMETRY input must be a whole number of float32 values: "
+            f"{len(data)} bytes is not a multiple of 4"
+        )
+    n_floats = len(data) // 4
+    if n_floats % channels != 0:
+        raise ValueError(
+            f"TELEMETRY input has {n_floats} floats, which is not a whole "
+            f"number of {channels}-channel samples"
+        )
+
+
 def _compress_telemetry(data: bytes, channels: int) -> tuple[int, int, bytes]:
     """Returns (TRANSFORM_TELEMETRY, entropy_coder, payload_bytes)."""
-    if _RUST_AVAILABLE:
+    _validate_telemetry_shape(data, channels)
+
+    if _rust_has("compress_telemetry"):
         try:
             return (
                 TRANSFORM_TELEMETRY,
@@ -220,7 +273,7 @@ def _compress_telemetry(data: bytes, channels: int) -> tuple[int, int, bytes]:
     n_samples = n_floats // channels
     floats = struct.unpack(f">{n_floats}f", data[: n_floats * 4])
 
-    ch_vals = [
+    ch_vals: list[list[float]] = [
         [floats[t * channels + ch] for t in range(n_samples)] for ch in range(channels)
     ]
 
@@ -250,7 +303,7 @@ def _decompress_telemetry(
     payload_bytes: bytes, original_length: int, channels: int, entropy_coder: int
 ) -> bytes:
     """Inverse of _compress_telemetry."""
-    if _RUST_AVAILABLE and entropy_coder == ENTROPY_ZSTD:
+    if _rust_has("decompress_telemetry") and entropy_coder == ENTROPY_ZSTD:
         try:
             return _ac.decompress_telemetry(payload_bytes, original_length, channels)
         except Exception:
@@ -404,7 +457,7 @@ def _compress_binary(data: bytes) -> tuple[int, int, bytes]:
     For float32 arrays: reorder bytes to group exponents/mantissas.
     Otherwise plain LZMA.
     """
-    if _RUST_AVAILABLE and len(data) >= 16 and len(data) % 4 == 0:
+    if _rust_has("compress_binary_float") and len(data) >= 16 and len(data) % 4 == 0:
         try:
             return TRANSFORM_BINARY_FLOAT, ENTROPY_ZSTD, _ac.compress_binary_float(data)
         except Exception:
@@ -433,7 +486,7 @@ def _decompress_binary_float(
     payload_bytes: bytes, original_length: int, entropy_coder: int
 ) -> bytes:
     """Inverse of float byte-reorder."""
-    if _RUST_AVAILABLE and entropy_coder == ENTROPY_ZSTD:
+    if _rust_has("decompress_binary_float") and entropy_coder == ENTROPY_ZSTD:
         try:
             return _ac.decompress_binary_float(payload_bytes, original_length)
         except Exception:
@@ -475,16 +528,22 @@ def compress(
     voice_bps: int = 1200,
     channels: int = 0,
 ) -> bytes:
-    """Compress data using the McKay v2 domain-aware pipeline."""
+    """Compress data using the McKay domain-aware pipeline (writes format v3)."""
     if not isinstance(data, bytes):
         raise TypeError("data must be bytes")
+
+    if len(data) > MAX_ORIGINAL_SIZE:
+        raise ValueError(
+            f"input too large for McKay header: {len(data)} bytes "
+            f"(max {MAX_ORIGINAL_SIZE})"
+        )
 
     if len(data) == 0:
         payload = lzma.compress(b"", preset=9)
         return (
             MAGIC
             + bytes([MCKAY_VERSION, TRANSFORM_PASSTHROUGH])
-            + _pack_u16(0)
+            + _pack_u32(0)
             + bytes([0, ENTROPY_LZMA])
             + payload
         )
@@ -515,34 +574,59 @@ def compress(
         payload = lzma.compress(data, preset=9)
     if len(payload) >= len(data):
         tid = TRANSFORM_PASSTHROUGH
-        entropy_coder = 0xFF  # No entropy coding
+        entropy_coder = ENTROPY_NONE  # No entropy coding
         payload = data
 
-    orig_len = min(len(data), 0xFFFF)
+    if channels > 255:
+        raise ValueError(f"channels must be 0-255, got {channels}")
+
     header = (
         MAGIC
         + bytes([MCKAY_VERSION, tid])
-        + _pack_u16(orig_len)
-        + bytes([min(channels, 255), entropy_coder])
+        + _pack_u32(len(data))
+        + bytes([channels, entropy_coder])
     )
     return header + payload
 
 
-def decompress(data: bytes) -> bytes:
-    """Decompress a McKay v2 compressed stream."""
+def _parse_header(data: bytes) -> tuple[int, int, int, int, int, bytes]:
+    """
+    Parse a McKay header.
+
+    Returns ``(version, transform_id, original_length, channels,
+    entropy_coder, payload)``. Both the current v3 header (32-bit original
+    length) and the legacy v2 header (16-bit) are accepted so that streams
+    written by earlier releases still decode.
+    """
     if not isinstance(data, bytes):
         raise TypeError("data must be bytes")
-    if len(data) < HEADER_SIZE:
-        raise ValueError(f"Too short for McKay v2 header: {len(data)} bytes")
+    if len(data) < HEADER_SIZE_V2:
+        raise ValueError(f"Too short for McKay header: {len(data)} bytes")
     if data[:2] != MAGIC:
         raise ValueError(f"Bad magic: {data[:2]!r} (expected b'MK')")
 
-    _version = data[2]
+    version = data[2]
     tid = data[3]
-    orig_len = _unpack_u16(data[4:6])
-    channels = data[6]
-    entropy_coder = data[7]
-    payload = data[HEADER_SIZE:]
+
+    if version >= 3:
+        if len(data) < HEADER_SIZE:
+            raise ValueError(f"Too short for McKay v3 header: {len(data)} bytes")
+        orig_len = _unpack_u32(data[4:8])
+        channels = data[8]
+        entropy_coder = data[9]
+        payload = data[HEADER_SIZE:]
+    else:
+        orig_len = _unpack_u16(data[4:6])
+        channels = data[6]
+        entropy_coder = data[7]
+        payload = data[HEADER_SIZE_V2:]
+
+    return version, tid, orig_len, channels, entropy_coder, payload
+
+
+def decompress(data: bytes) -> bytes:
+    """Decompress a McKay compressed stream (v2 or v3)."""
+    _version, tid, orig_len, channels, entropy_coder, payload = _parse_header(data)
 
     # Select decompressor based on entropy coder
     def _entropy_decompress(payload: bytes) -> bytes:
@@ -563,7 +647,10 @@ def decompress(data: bytes) -> bytes:
                 raise ValueError(f"Unknown entropy coder: 0x{entropy_coder:02X}")
         except Exception as e:
             # If primary coder fails, try alternatives for robustness
-            warning_msg = f"Primary entropy coder 0x{entropy_coder:02X} failed: {e}, trying alternatives"
+            warning_msg = (
+                f"Primary entropy coder 0x{entropy_coder:02X} failed: {e}, "
+                f"trying alternatives"
+            )
             warnings.warn(warning_msg, UserWarning)
 
             # Try other coders in order of preference
@@ -601,7 +688,7 @@ def decompress(data: bytes) -> bytes:
 
     if tid == TRANSFORM_TEXT:
         # Try Rust decompression first (handles both entropy and abbreviation decoding)
-        if _RUST_AVAILABLE:
+        if _rust_has("decompress_text"):
             try:
                 return _ac.decompress_text(payload)
             except Exception:
@@ -620,24 +707,51 @@ def decompress(data: bytes) -> bytes:
     if tid == TRANSFORM_TELEMETRY:
         if channels == 0:
             channels = 1
-        return _decompress_telemetry(payload, orig_len, channels, entropy_coder)
+        out = _decompress_telemetry(payload, orig_len, channels, entropy_coder)
+        return _verify_length(out, orig_len, _version, "TELEMETRY")
 
     if tid == TRANSFORM_VOICE_C2:
         return _decompress_voice(payload)
 
     if tid == TRANSFORM_BINARY_FLOAT:
-        return _decompress_binary_float(payload, orig_len, entropy_coder)
+        out = _decompress_binary_float(payload, orig_len, entropy_coder)
+        return _verify_length(out, orig_len, _version, "BINARY_FLOAT")
 
-    raise ValueError(f"Unknown McKay v2 transform ID: 0x{tid:02X}")
+    raise ValueError(f"Unknown McKay transform ID: 0x{tid:02X}")
+
+
+def _verify_length(out: bytes, orig_len: int, version: int, what: str) -> bytes:
+    """
+    Guard against silently returning a wrong-sized reconstruction.
+
+    v2 streams stored the original length in 16 bits, so anything at or above
+    65535 was already unrecoverable when it was written; those are reported as
+    such rather than handed back truncated.
+    """
+    if version < 3:
+        if orig_len >= 0xFFFF:
+            raise ValueError(
+                f"{what} stream is legacy McKay v2 and its original length was "
+                f"truncated to 16 bits when written; the exact size cannot be "
+                f"recovered. Re-compress the source with this version."
+            )
+        return out
+    if len(out) != orig_len:
+        raise ValueError(
+            f"{what} reconstruction is {len(out)} bytes but the header "
+            f"declares {orig_len}"
+        )
+    return out
 
 
 def stats(compressed: bytes) -> dict:
-    """Return compression statistics for a McKay v2 stream."""
-    if len(compressed) < HEADER_SIZE:
-        return {"error": "too short"}
-    tid = compressed[3]
-    orig_len = _unpack_u16(compressed[4:6])
-    payload = compressed[HEADER_SIZE:]
+    """Return compression statistics for a McKay stream (v2 or v3)."""
+    try:
+        _version, tid, orig_len, _channels, _entropy, payload = _parse_header(
+            compressed
+        )
+    except (TypeError, ValueError) as exc:
+        return {"error": str(exc)}
     names = {
         TRANSFORM_PASSTHROUGH: "passthrough",
         TRANSFORM_TEXT: "text",
@@ -645,12 +759,16 @@ def stats(compressed: bytes) -> dict:
         TRANSFORM_VOICE_C2: "voice_codec2",
         TRANSFORM_BINARY_FLOAT: "binary_float",
     }
-    comp_size = len(payload)
+    # Report the size of the whole stream, header included: that is what has
+    # to be transmitted, so it is what the ratio should be measured against.
+    comp_size = len(compressed)
     ratio = orig_len / comp_size if comp_size > 0 else 0.0
     return {
         "transform": names.get(tid, f"unknown_0x{tid:02X}"),
+        "version": _version,
         "original_size": orig_len,
         "compressed_size": comp_size,
+        "payload_size": len(payload),
         "ratio": round(ratio, 3),
         "savings_pct": round((1 - 1 / ratio) * 100, 1) if ratio > 0 else 0.0,
     }

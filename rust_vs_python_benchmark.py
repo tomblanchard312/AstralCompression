@@ -3,6 +3,14 @@
 Benchmark comparison between Rust and Python implementations of ASTRAL compression algorithms.
 This demonstrates the performance improvements achieved by using Rust.
 """
+import sys
+
+# Windows consoles default to a legacy code page; these scripts print check
+# marks, so force UTF-8 rather than dying with UnicodeEncodeError mid-report.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 
 import time
 import numpy as np
@@ -14,7 +22,9 @@ from typing import Tuple
 try:
     import astral_compress as ac
 
-    RUST_AVAILABLE = True
+    # Importability is not enough: the un-built `astral_compress/` source
+    # directory imports as an empty namespace package.
+    RUST_AVAILABLE = hasattr(ac, "compress_text")
 except ImportError:
     RUST_AVAILABLE = False
     ac = None
@@ -216,7 +226,11 @@ def benchmark_telemetry(n_samples: int, n_channels: int, iterations: int = 5) ->
             "compression_ratio": compression_ratio,
             "throughput": len(data) / rust_avg / 1024 / 1024,  # MB/s
         }
-        print(".3f")
+        print(
+            f"  rust: {results['rust']['time']*1000:.3f} ms, "
+            f"ratio {results['rust']['compression_ratio']:.2f}x, "
+            f"{results['rust']['throughput']:.1f} MB/s"
+        )
 
     # Python implementation
     python_times = []
@@ -233,7 +247,11 @@ def benchmark_telemetry(n_samples: int, n_channels: int, iterations: int = 5) ->
         "compression_ratio": compression_ratio,
         "throughput": len(data) / python_avg / 1024 / 1024,  # MB/s
     }
-    print(".3f")
+    print(
+        f"  python: {results['python']['time']*1000:.3f} ms, "
+        f"ratio {results['python']['compression_ratio']:.2f}x, "
+        f"{results['python']['throughput']:.1f} MB/s"
+    )
 
     return results
 
@@ -259,7 +277,11 @@ def benchmark_binary_float(data_size: int, iterations: int = 5) -> dict:
             "compression_ratio": compression_ratio,
             "throughput": len(data) / rust_avg / 1024 / 1024,  # MB/s
         }
-        print(".3f")
+        print(
+            f"  python: {results['python']['time']*1000:.3f} ms, "
+            f"ratio {results['python']['compression_ratio']:.2f}x, "
+            f"{results['python']['throughput']:.1f} MB/s"
+        )
 
     # Python implementation
     python_times = []
@@ -276,7 +298,11 @@ def benchmark_binary_float(data_size: int, iterations: int = 5) -> dict:
         "compression_ratio": compression_ratio,
         "throughput": len(data) / python_avg / 1024 / 1024,  # MB/s
     }
-    print(".3f")
+    print(
+        f"  python: {results['python']['time']*1000:.3f} ms, "
+        f"ratio {results['python']['compression_ratio']:.2f}x, "
+        f"{results['python']['throughput']:.1f} MB/s"
+    )
 
     return results
 
@@ -302,7 +328,11 @@ def benchmark_text(data_size: int, iterations: int = 5) -> dict:
             "compression_ratio": compression_ratio,
             "throughput": len(data) / rust_avg / 1024 / 1024,  # MB/s
         }
-        print(".3f")
+        print(
+            f"  python: {results['python']['time']*1000:.3f} ms, "
+            f"ratio {results['python']['compression_ratio']:.2f}x, "
+            f"{results['python']['throughput']:.1f} MB/s"
+        )
 
     # Python implementation
     python_times = []
@@ -319,7 +349,11 @@ def benchmark_text(data_size: int, iterations: int = 5) -> dict:
         "compression_ratio": compression_ratio,
         "throughput": len(data) / python_avg / 1024 / 1024,  # MB/s
     }
-    print(".3f")
+    print(
+        f"  python: {results['python']['time']*1000:.3f} ms, "
+        f"ratio {results['python']['compression_ratio']:.2f}x, "
+        f"{results['python']['throughput']:.1f} MB/s"
+    )
 
     return results
 
@@ -382,20 +416,20 @@ def main():
             python_time = results["python"]["time"]
             speedup = python_time / rust_time if rust_time > 0 else 0
 
-            print(".3f")
-            print(".1f")
+            print(
+                f"  rust {rust_time*1000:.3f} ms vs python "
+                f"{python_time*1000:.3f} ms"
+            )
+            print(f"  speedup: {speedup:.1f}x")
 
             total_rust_speedup += speedup
             total_tests += 1
 
     if total_tests > 0:
-        print(".1f")
-        print(
-            "\n🚀 CONCLUSION: Rust implementation achieves landmark performance improvements!"
-        )
-        print("   - Dramatic speedups across all compression algorithms")
-        print("   - Better compression ratios in most cases")
-        print("   - Enables real-time compression for space communications")
+        average = total_rust_speedup / total_tests
+        print(f"\nAverage speedup across {total_tests} tests: {average:.1f}x")
+        print("   - Measured on this machine, this build, this dataset")
+        print("   - Compression ratios are reported per test above")
 
 
 if __name__ == "__main__":

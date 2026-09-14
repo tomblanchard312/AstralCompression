@@ -59,6 +59,17 @@ class SpacePacketSequenceCounter:
         self._counts[apid] = (c + 1) % 16384
         return c
 
+    def set(self, apid: int, count: int) -> None:
+        """
+        Set the next count for an APID (wrapped into the 14-bit range).
+
+        Useful when resuming a pass and the ground segment expects the
+        sequence to continue where the last contact left off.
+        """
+        if not (0 <= apid <= 0x7FF):
+            raise ValueError("apid must be 0..0x7FF")
+        self._counts[apid] = int(count) % 16384
+
     def reset(self, apid: int | None = None) -> None:
         """
         Reset counter for one APID, or all APIDs if apid is None.

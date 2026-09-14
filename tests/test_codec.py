@@ -151,7 +151,10 @@ class TestOptionalPhases:
         assert parsed["apid"] == sp.APID_MAP["DETECT"][0]
 
     def test_rs_fec_roundtrip(self, detect_msg):
-        rs = pytest.importorskip("astral.rs_fec")
+        try:
+            from astral import rs_fec as rs
+        except ImportError:
+            pytest.skip("requires the 'rs' extra (reedsolo)")
         astral = pack_message(detect_msg, extra_fountain=3)
         protected = rs.encode_stream(astral, e=16)
         recovered, _, n_drop = rs.decode_stream(protected, e=16)

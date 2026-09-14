@@ -1,5 +1,8 @@
 from .codec import (
+    header_redundancy_for,
     pack_message,
+    pack_mckay_message,
+    unpack_mckay_stream,
     unpack_stream,
     pack_message_rs,
     unpack_stream_rs,
@@ -10,7 +13,10 @@ from .codec import (
 )
 
 __all__ = [
+    "header_redundancy_for",
     "pack_message",
+    "pack_mckay_message",
+    "unpack_mckay_stream",
     "unpack_stream",
     "pack_message_rs",
     "unpack_stream_rs",

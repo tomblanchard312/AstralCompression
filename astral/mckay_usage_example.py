@@ -1,291 +1,156 @@
 #!/usr/bin/env python3
 """
-McKay + ASTRAL Usage Example
-Practical examples of using Dr. McKay's extreme compression with ASTRAL fountain codes.
+McKay + ASTRAL usage examples.
 
-This demonstrates:
-1. How to compress different types of data
-2. Integration with existing ASTRAL systems
-3. Real-world compression ratios
-4. Deep space communication optimization
+Runnable demonstrations of the full path: domain-aware compression, a
+replicated metadata gist, and a fountain-coded body that survives packet loss.
+
+    python -m astral.mckay_usage_example
 """
 
-from astral.mckay_astral_integration import (
-    McKayASTRALIntegration,
-    McKayASTRALCompressor,
+import math
+import random
+import struct
+import sys
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+from astral import mckay_astral_integration as mckay
+from astral.codec import (
+    header_redundancy_for,
+    pack_mckay_message,
+    unpack_mckay_stream,
+    unpack_stream,
 )
-import time
+from astral.container import HEADER_GIST, MCKAY_GIST
 
 
-def example_mission_communication():
-    """Example: Compressing mission communications for deep space transmission"""
-    print("=== Mission Communication Example ===")
+def _report(label: str, source: bytes, stream: bytes) -> None:
+    atoms = len(stream) // 32
+    print(f"  {label}")
+    print(f"    source      : {len(source):,} bytes")
+    print(f"    on the wire : {len(stream):,} bytes in {atoms} atoms")
+    print(f"    wire ratio  : {len(source) / len(stream):.2f}x (redundancy included)")
 
-    # Create McKay + ASTRAL integration
-    integration = McKayASTRALIntegration()
 
-    # Mission status report
-    mission_report = """
-    MISSION STATUS REPORT - ATLANTIS EXPEDITION
-    
-    COLONEL SHEPPARD: All systems operational. ZPM at 87% capacity.
-    DR. MCKAY: Ancient database analysis complete. Compression algorithm working perfectly.
-    MAJOR LORNE: Security perimeter secure. No Wraith activity detected.
-    DR. WEIR: Excellent work team. Ready for next phase.
-    
-    TECHNICAL DATA:
-    - Power consumption: 2.3 MW (nominal)
-    - Shield strength: 94%
-    - Life support: 100%
-    - Communications: Optimal
-    - Sensors: All operational
-    
-    NEXT OBJECTIVES:
-    1. Continue Ancient technology research
-    2. Maintain ZPM efficiency
-    3. Monitor for Wraith activity
-    4. Prepare for Earth contact
-    
-    END REPORT
-    """
+def example_mission_report() -> bytes:
+    """Text: mission prose compressed and atomized."""
+    print("=== Mission report (TEXT) ===")
+    report = (
+        "MISSION STATUS REPORT\n"
+        "Battery temperature nominal. Attitude nominal. Downlink established.\n"
+        "Payload telemetry nominal. No anomaly detected. Subsystem interface ok.\n"
+    ) * 40
+    source = report.encode("utf-8")
 
-    print(f"Original mission report: {len(mission_report)} characters")
+    stream = pack_mckay_message(source, "TEXT", extra_fountain=15)
+    _report("McKay + fountain", source, stream)
 
-    # Compress with McKay + ASTRAL
-    compressed = integration.compress_and_encode(
-        mission_report, "TEXT", extra_fountain=15
+    result = unpack_mckay_stream(stream)
+    print(f"    gist        : {result['mckay']}")
+    print(f"    recovered   : {'exact' if result['data'] == source else 'MISMATCH'}")
+    return stream
+
+
+def example_telemetry() -> bytes:
+    """Telemetry: a float32 matrix, quantised and delta-coded."""
+    print("\n=== Spacecraft telemetry (TELEMETRY) ===")
+    channels = 4
+    samples = 2000
+    values = []
+    for t in range(samples):
+        for ch in range(channels):
+            values.append(math.sin(t / 40.0 + ch) * 10.0 + ch)
+    source = struct.pack(f">{len(values)}f", *values)
+
+    stream = pack_mckay_message(source, "TELEMETRY", channels=channels)
+    _report("McKay + fountain", source, stream)
+
+    result = unpack_mckay_stream(stream)
+    restored = struct.unpack(f">{len(values)}f", result["data"])
+    max_err = max(abs(a - b) for a, b in zip(values, restored))
+    print(f"    quantiser   : lossy by design, max error {max_err:.2e}")
+    return stream
+
+
+def example_binary() -> bytes:
+    """Binary float data: byte reordering before entropy coding."""
+    print("\n=== Scientific binary data (BINARY) ===")
+    source = struct.pack(f">{5000}f", *[i * 0.25 for i in range(5000)])
+    stream = pack_mckay_message(source, "BINARY")
+    _report("McKay + fountain", source, stream)
+    result = unpack_mckay_stream(stream)
+    print(f"    recovered   : {'exact' if result['data'] == source else 'MISMATCH'}")
+    return stream
+
+
+def example_gist_under_loss() -> None:
+    """The point of gist-first: something useful survives heavy loss."""
+    print("\n=== Gist-first behaviour under packet loss ===")
+    source = ("Telemetry nominal. Battery temperature nominal. " * 200).encode()
+
+    # Size the header replication for the loss rate the link actually sees.
+    loss = 0.8
+    stream = pack_mckay_message(
+        source,
+        "TEXT",
+        extra_fountain=20,
+        header_redundancy=header_redundancy_for(loss),
     )
+    atoms = [stream[i : i + 32] for i in range(0, len(stream), 32)]
+    print(f"  message: {len(atoms)} atoms, header replication sized for {loss:.0%} loss")
 
-    # Get compression stats
-    mckay_stats = integration.mckay_compressor.get_compression_stats()
-    integration_stats = integration.get_integration_stats()
+    trials = 200
+    full = gist_only = nothing = 0
+    for seed in range(trials):
+        rng = random.Random(seed)
+        kept = b"".join(a for a in atoms if rng.random() >= loss)
+        result = unpack_stream(kept)
+        if result.get("data") == source:
+            full += 1
+        elif result.get("mckay"):
+            gist_only += 1
+        else:
+            nothing += 1
 
-    print(f"\nCompression Results:")
-    print(f"  McKay compression: {mckay_stats['compression_ratio']:.2f}x")
-    print(f"  McKay rating: {mckay_stats['mckay_rating']}")
-    print(f"  Total compression: {integration_stats['total_compression']:.2f}x")
-    print(f"  Space saved: {mckay_stats['space_saved_percent']:.1f}%")
+    print(f"  at {loss:.0%} loss over {trials} trials:")
+    print(f"    full payload recovered : {full / trials:.0%}")
+    print(f"    gist only              : {gist_only / trials:.0%}")
+    print(f"    nothing                : {nothing / trials:.0%}")
 
-    # Test decompression
-    decompressed = integration.decompress_and_decode(compressed)
-    print(f"\nDecompression: {'✅ Success' if len(decompressed) > 0 else '❌ Failed'}")
-
-    return compressed
-
-
-def example_telemetry_data():
-    """Example: Compressing telemetry data for efficient transmission"""
-    print("\n=== Telemetry Data Example ===")
-
-    integration = McKayASTRALIntegration()
-
-    # Simulate telemetry data (repetitive sensor readings)
-    telemetry_data = []
-    for i in range(1000):
-        telemetry_data.append(f"SENSOR_{i%10}:{100 + (i%50)}:NOMINAL")
-
-    telemetry_text = "\n".join(telemetry_data)
-    print(f"Original telemetry: {len(telemetry_text)} characters")
-
-    # Compress telemetry
-    compressed = integration.compress_and_encode(
-        telemetry_text, "TEXT", extra_fountain=10
+    # Show what the gist alone tells you when no fountain packet arrives.
+    gist_atoms = b"".join(
+        a for a in atoms if a[9] in (HEADER_GIST, MCKAY_GIST)
     )
-
-    # Get stats
-    mckay_stats = integration.mckay_compressor.get_compression_stats()
-    print(f"\nTelemetry Compression:")
-    print(f"  Compression ratio: {mckay_stats['compression_ratio']:.2f}x")
-    print(f"  McKay rating: {mckay_stats['mckay_rating']}")
-    print(f"  Space saved: {mckay_stats['space_saved_percent']:.1f}%")
-
-    return compressed
+    result = unpack_stream(gist_atoms)
+    print(f"  gist without any fountain packet: {result['mckay']}")
 
 
-def example_binary_data():
-    """Example: Compressing binary data (scientific measurements)"""
-    print("\n=== Binary Data Example ===")
-
-    integration = McKayASTRALIntegration()
-
-    # Simulate scientific measurement data (repetitive patterns)
-    # This is the kind of data McKay's algorithm excels at
-    measurement_data = b""
-    for i in range(1000):
-        # Create repetitive patterns
-        if i % 100 == 0:
-            measurement_data += b"\x00\x01\x02\x03\x04\x05" * 10  # Pattern 1
-        elif i % 50 == 0:
-            measurement_data += b"\xff\xfe\xfd\xfc" * 25  # Pattern 2
-        else:
-            measurement_data += b"\xaa\xbb\xcc\xdd" * 5  # Pattern 3
-
-    print(f"Original binary data: {len(measurement_data)} bytes")
-
-    # Compress binary data
-    compressed = integration.compress_and_encode(
-        measurement_data, "BINARY", extra_fountain=20
-    )
-
-    # Get stats
-    mckay_stats = integration.mckay_compressor.get_compression_stats()
-    print(f"\nBinary Data Compression:")
-    print(f"  Compression ratio: {mckay_stats['compression_ratio']:.2f}x")
-    print(f"  McKay rating: {mckay_stats['mckay_rating']}")
-    print(f"  Space saved: {mckay_stats['space_saved_percent']:.1f}%")
-
-    return compressed
+def example_compression_only() -> None:
+    """Compression on its own, without the transmission layer."""
+    print("\n=== Compressor used directly ===")
+    source = ("satellite telemetry nominal battery temperature " * 100).encode()
+    compressed = mckay.compress(source, "TEXT")
+    print(f"  stats: {mckay.stats(compressed)}")
+    assert mckay.decompress(compressed) == source
 
 
-def example_voice_compression():
-    """Example: Compressing voice data for communication"""
-    print("\n=== Voice Compression Example ===")
-
-    integration = McKayASTRALIntegration()
-
-    # Simulate voice data (repetitive audio patterns)
-    # In practice, this would be real audio data
-    voice_data = b""
-    for i in range(1000):
-        # Simulate repetitive audio patterns
-        if i % 200 == 0:
-            voice_data += b"\x80" * 100  # Silence
-        elif i % 100 == 0:
-            voice_data += b"\x90" * 50  # Low tone
-        else:
-            voice_data += b"\xa0" * 25  # High tone
-
-    print(f"Original voice data: {len(voice_data)} bytes")
-
-    # Compress voice data
-    compressed = integration.compress_and_encode(voice_data, "VOICE", extra_fountain=25)
-
-    # Get stats
-    mckay_stats = integration.mckay_compressor.get_compression_stats()
-    print(f"\nVoice Compression:")
-    print(f"  Compression ratio: {mckay_stats['compression_ratio']:.2f}x")
-    print(f"  McKay rating: {mckay_stats['mckay_rating']}")
-    print(f"  Space saved: {mckay_stats['space_saved_percent']:.1f}%")
-
-    return compressed
-
-
-def example_deep_space_transmission():
-    """Example: Complete deep space transmission workflow"""
-    print("\n=== Deep Space Transmission Example ===")
-
-    integration = McKayASTRALIntegration()
-
-    # Simulate a complete mission data package
-    mission_data = {
-        "text": "Mission critical data for Earth command.",
-        "telemetry": "All systems operational. ZPM stable.",
-        "binary": b"\x00\x01\x02\x03" * 500,  # Scientific data
-        "voice": b"\x80\x90\xa0" * 200,  # Voice message
-    }
-
-    print("Preparing mission data package for deep space transmission...")
-
-    # Compress each data type
-    compressed_package = {}
-    total_original = 0
-    total_compressed = 0
-
-    for data_type, data in mission_data.items():
-        if isinstance(data, str):
-            compressed = integration.compress_and_encode(
-                data, "TEXT", extra_fountain=10
-            )
-            original_size = len(data.encode("utf-8"))
-        else:
-            compressed = integration.compress_and_encode(
-                data, "BINARY", extra_fountain=10
-            )
-            original_size = len(data)
-
-        compressed_package[data_type] = compressed
-        total_original += original_size
-        total_compressed += len(compressed)
-
-        mckay_stats = integration.mckay_compressor.get_compression_stats()
-        print(f"  {data_type}: {mckay_stats['compression_ratio']:.2f}x compression")
-
-    # Calculate overall compression
-    overall_ratio = total_original / total_compressed
-    space_saved = total_original - total_compressed
-    space_saved_percent = (space_saved / total_original) * 100
-
-    print(f"\nOverall Mission Data Compression:")
-    print(f"  Total original: {total_original} bytes")
-    print(f"  Total compressed: {total_compressed} bytes")
-    print(f"  Overall ratio: {overall_ratio:.2f}x")
-    print(f"  Total space saved: {space_saved_percent:.1f}%")
-
-    # Simulate transmission
-    print(f"\nTransmitting to Earth...")
-    print(f"  Estimated transmission time reduction: {space_saved_percent:.0f}%")
-    print(f"  Bandwidth efficiency: {overall_ratio:.1f}x")
-
-    return compressed_package
-
-
-def performance_benchmark():
-    """Benchmark the McKay + ASTRAL system performance"""
-    print("\n=== Performance Benchmark ===")
-
-    integration = McKayASTRALIntegration()
-
-    # Test data sizes
-    test_sizes = [100, 1000, 10000, 100000]
-
-    print("Compression Performance by Data Size:")
-    print("Size (chars) | Time (ms) | Ratio | Rating")
-    print("-" * 50)
-
-    for size in test_sizes:
-        # Generate test data
-        test_data = "The Ancient database contains critical information. " * (
-            size // 50
-        )
-
-        # Measure compression time
-        start_time = time.time()
-        compressed = integration.compress_and_encode(test_data, "TEXT")
-        compression_time = (time.time() - start_time) * 1000
-
-        # Get stats
-        mckay_stats = integration.mckay_compressor.get_compression_stats()
-
-        print(
-            f"{size:11} | {compression_time:9.1f} | {mckay_stats['compression_ratio']:5.1f}x | {mckay_stats['mckay_rating'][:10]}"
-        )
-
-
-def main():
-    """Main function demonstrating McKay + ASTRAL system"""
-    print("🚀 McKay + ASTRAL Deep Space Compression System")
+def main() -> int:
+    print("McKay + ASTRAL deep space compression")
     print("=" * 60)
-
     try:
-        # Run examples
-        example_mission_communication()
-        example_telemetry_data()
-        example_binary_data()
-        example_voice_compression()
-        example_deep_space_transmission()
-        performance_benchmark()
-
-        print("\n" + "=" * 60)
-        print("✅ All examples completed successfully!")
-        print("\nMcKay's extreme compression is now integrated with ASTRAL!")
-        print("Ready for deep space communication with compression ratios of 2-100x!")
-
-    except Exception as e:
-        print(f"\n❌ Error during demonstration: {e}")
-        import traceback
-
-        traceback.print_exc()
+        example_mission_report()
+        example_telemetry()
+        example_binary()
+        example_gist_under_loss()
+        example_compression_only()
+    except Exception as exc:  # pragma: no cover - demonstration script
+        print(f"Error during demonstration: {exc}")
+        return 1
+    print("\nAll examples completed.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

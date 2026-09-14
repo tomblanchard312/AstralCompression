@@ -2,6 +2,14 @@
 """
 Benchmark comparison between Rust and C implementations of ASTRAL compression algorithms.
 """
+import sys
+
+# Windows consoles default to a legacy code page; these scripts print check
+# marks, so force UTF-8 rather than dying with UnicodeEncodeError mid-report.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 
 import time
 import numpy as np
@@ -13,7 +21,9 @@ import os
 try:
     import astral_compress as ac
 
-    RUST_AVAILABLE = True
+    # Importability is not enough: the un-built `astral_compress/` source
+    # directory imports as an empty namespace package.
+    RUST_AVAILABLE = hasattr(ac, "compress_text")
 except ImportError:
     RUST_AVAILABLE = False
     ac = None
@@ -146,7 +156,11 @@ def benchmark_telemetry(n_samples: int, n_channels: int, iterations: int = 10) -
             "compression_ratio": compression_ratio,
             "throughput": len(data) / rust_avg / 1024 / 1024,  # MB/s
         }
-        print(".3f")
+        print(
+            f"  rust: {results['rust']['time']*1000:.3f} ms, "
+            f"ratio {results['rust']['compression_ratio']:.2f}x, "
+            f"{results['rust']['throughput']:.1f} MB/s"
+        )
 
     # C implementation
     if C_AVAILABLE:
@@ -190,7 +204,11 @@ def benchmark_telemetry(n_samples: int, n_channels: int, iterations: int = 10) -
             "compression_ratio": compression_ratio,
             "throughput": len(data) / c_avg / 1024 / 1024,  # MB/s
         }
-        print(".3f")
+        print(
+            f"  c: {results['c']['time']*1000:.3f} ms, "
+            f"ratio {results['c']['compression_ratio']:.2f}x, "
+            f"{results['c']['throughput']:.1f} MB/s"
+        )
 
     return results
 
@@ -218,7 +236,11 @@ def benchmark_binary_float(data_size: int, iterations: int = 10) -> dict:
             "compression_ratio": compression_ratio,
             "throughput": len(data) / rust_avg / 1024 / 1024,  # MB/s
         }
-        print(".3f")
+        print(
+            f"  rust: {results['rust']['time']*1000:.3f} ms, "
+            f"ratio {results['rust']['compression_ratio']:.2f}x, "
+            f"{results['rust']['throughput']:.1f} MB/s"
+        )
 
     # C implementation
     if C_AVAILABLE:
@@ -256,7 +278,11 @@ def benchmark_binary_float(data_size: int, iterations: int = 10) -> dict:
             "compression_ratio": len(data) / compressed_size if compressed_size > 0 else 0,
             "throughput": len(data) / c_avg / 1024 / 1024,  # MB/s
         }
-        print(".3f")
+        print(
+            f"  c: {results['c']['time']*1000:.3f} ms, "
+            f"ratio {results['c']['compression_ratio']:.2f}x, "
+            f"{results['c']['throughput']:.1f} MB/s"
+        )
 
     return results
 
@@ -283,7 +309,11 @@ def benchmark_text(data_size: int, iterations: int = 10) -> dict:
             "compression_ratio": len(data) / len(compressed),
             "throughput": len(data) / rust_avg / 1024 / 1024,  # MB/s
         }
-        print(".3f")
+        print(
+            f"  rust: {results['rust']['time']*1000:.3f} ms, "
+            f"ratio {results['rust']['compression_ratio']:.2f}x, "
+            f"{results['rust']['throughput']:.1f} MB/s"
+        )
 
     # C implementation
     if C_AVAILABLE:
@@ -319,7 +349,11 @@ def benchmark_text(data_size: int, iterations: int = 10) -> dict:
             "compression_ratio": compression_ratio,
             "throughput": len(data) / c_avg / 1024 / 1024,  # MB/s
         }
-        print(".3f")
+        print(
+            f"  c: {results['c']['time']*1000:.3f} ms, "
+            f"ratio {results['c']['compression_ratio']:.2f}x, "
+            f"{results['c']['throughput']:.1f} MB/s"
+        )
 
     return results
 

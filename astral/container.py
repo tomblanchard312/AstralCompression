@@ -6,7 +6,8 @@ SYNC1 = 0xE6
 ATOM_SIZE = 32
 HEADER_GIST = 0
 FOUNTAIN_PACKET = 1
-DICT_UPDATE = 2  # reserved
+DICT_UPDATE = 2
+MCKAY_GIST = 3  # McKay compression metadata (see codec.pack_mckay_message)
 
 
 def make_atom(
@@ -48,28 +49,35 @@ def make_atom(
 
 
 def parse_atoms(stream: bytes):
-    # Input validation
+    """
+    Extract atoms from a received byte stream.
+
+    The stream is scanned for the sync word rather than assumed to start on an
+    atom boundary: a real link hands over bytes with slips, truncated leading
+    fragments and gaps, and an aligned-only parser throws the whole message
+    away when the stream is off by one byte. An atom is accepted only when its
+    sync word and CRC-8 both check out, after which scanning resumes at the end
+    of that atom.
+    """
     if not isinstance(stream, bytes):
         raise ValueError("stream must be bytes")
 
     out = []
-    for i in range(0, len(stream), ATOM_SIZE):
+    i = 0
+    limit = len(stream) - ATOM_SIZE
+    while i <= limit:
+        if stream[i] != SYNC0 or stream[i + 1] != SYNC1:
+            i += 1
+            continue
         chunk = stream[i : i + ATOM_SIZE]
-        if len(chunk) < ATOM_SIZE:
-            break
-        if chunk[0] != SYNC0 or chunk[1] != SYNC1:
+        if (crc8_j1850(chunk[:31]) & 0xFF) != chunk[31]:
+            i += 1
             continue
-        try:
-            crc = crc8_j1850(chunk[:31])
-            if (crc & 0xFF) != chunk[31]:
-                continue
-            idx = chunk[3] | (chunk[4] << 8)
-            total = chunk[5] | (chunk[6] << 8)
-            msg_id = chunk[7] | (chunk[8] << 8)
-            typ = chunk[9]
-            payload21 = bytes(chunk[10:31])
-            out.append((idx, total, msg_id, typ, payload21))
-        except (IndexError, ValueError):
-            # Skip malformed atoms
-            continue
+        idx = chunk[3] | (chunk[4] << 8)
+        total = chunk[5] | (chunk[6] << 8)
+        msg_id = chunk[7] | (chunk[8] << 8)
+        typ = chunk[9]
+        payload21 = bytes(chunk[10:31])
+        out.append((idx, total, msg_id, typ, payload21))
+        i += ATOM_SIZE
     return out
