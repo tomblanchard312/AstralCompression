@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-09-14 (second pass)
+
+### Fixed (data integrity)
+- **A corrupt atom could be reported as a clean decode.** CRC-8 rejects 255 of
+  every 256 corrupt atoms; the one that slips through is XORed into the
+  reconstruction, and nothing checked the result. Atom format 2 puts a CRC-32
+  of the assembled payload in the header atom and the decoder verifies it
+  before reporting success. Measured on 600-byte payloads where the corruption
+  reaches the fountain solution, the unchecked path returned wrong bytes as a
+  clean decode in 48 of 71 cases and raised in the other 23. Results now carry
+  `integrity_ok`, and a failure is reported as `complete: False` with an
+  error, with the gist still available.
+- `tests/test_basic.py::test_lossy` used an unseeded RNG and asserted the gist
+  always survives 40% loss, which fails roughly once in 40 runs by chance. It
+  is now seeded and sizes header replication for the loss it simulates.
+
+### Changed (performance, no wire-format change)
+- The fountain code XORs symbols as big integers instead of byte at a time,
+  indexes equations by the unknowns they contain instead of rescanning every
+  equation for every solved block, and draws packet indices from a sparse
+  Fisher-Yates instead of materialising `list(range(K))` per packet.
+- CRC-8 and CRC-16 are table-driven; the TM randomizer XORs a whole frame in
+  one operation.
+- Net effect on a 200 KB message: 3.9 s to 0.45 s to pack. Fountain decode at
+  K=2000 went from 509 ms to 40 ms; TM framing from 8.8 to 13.7 MB/s.
+- The sampler and both CRCs are covered by tests asserting bit-identical
+  output against the original reference implementations, since the Rust and C
+  ports mirror them and old streams must still decode.
+
+### Changed (API)
+- `container.parse_atoms` returns `Atom` named tuples carrying the atom format
+  version. Indexes 0-4 are unchanged, so positional access still works, but
+  five-way unpacking now needs a sixth name.
+
 ## 2026-09-14
 
 ### Fixed (data integrity)

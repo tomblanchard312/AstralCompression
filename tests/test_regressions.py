@@ -519,3 +519,183 @@ class TestRedundancyControl:
     def test_negative_redundancy_rejected(self):
         with pytest.raises(ValueError):
             codec.pack_text_message("hi", redundancy=-0.1)
+
+
+class TestPayloadIntegrity:
+    """
+    A corrupt atom that slips past its CRC-8 (1 in 256 do) poisons the XOR
+    reconstruction. Nothing used to check the result, so the decoder could
+    report a clean decode and hand back different bytes than were sent.
+    """
+
+    @staticmethod
+    def _corrupt_one_atom(blob: bytes, which: int = 0) -> bytes:
+        from astral.crc import crc8_j1850
+
+        atoms = [bytearray(blob[i : i + 32]) for i in range(0, len(blob), 32)]
+        fountain = [a for a in atoms if a[9] == container.FOUNTAIN_PACKET]
+        hit = fountain[which % len(fountain)]
+        hit[12] ^= 0x08
+        hit[31] = crc8_j1850(bytes(hit[:31])) & 0xFF  # CRC-8 now passes again
+        return b"".join(bytes(a) for a in atoms)
+
+    def test_clean_stream_reports_integrity_ok(self):
+        stream = codec.pack_text_message("nominal link, standing by")
+        result = codec.unpack_stream(stream)
+        assert result["complete"] is True
+        assert result["integrity_ok"] is True
+
+    def test_header_carries_the_payload_crc(self):
+        payload = b"telemetry nominal " * 20
+        stream = codec.pack_mckay_message(payload, "TEXT")
+        header = next(
+            a.payload
+            for a in container.parse_atoms(stream)
+            if a.atom_type == container.HEADER_GIST
+        )
+        crc = int.from_bytes(
+            header[codec.PAYLOAD_CRC_OFFSET : codec.PAYLOAD_CRC_OFFSET + 4],
+            "little",
+        )
+        assert crc != 0
+
+    def test_atoms_declare_format_version_2(self):
+        stream = codec.pack_text_message("hello")
+        assert all(a.version == container.ATOM_VERSION
+                   for a in container.parse_atoms(stream))
+
+    def test_corrupt_atom_is_never_reported_as_a_clean_decode(self):
+        payload = bytes((i * 7 + 11) % 256 for i in range(600))
+        silently_wrong = 0
+        detected = 0
+        for seed in range(30):
+            blob = codec.pack_mckay_message(
+                payload, "BINARY", message_id=seed + 1, redundancy=0.05,
+                min_redundancy=1,
+            )
+            damaged = self._corrupt_one_atom(blob, seed)
+            result = codec.unpack_stream(damaged)
+            if result.get("integrity_ok") is False:
+                detected += 1
+                assert result["complete"] is False
+                assert result["message"] is None
+                assert "integrity" in result["error"]
+            elif result["complete"] and result.get("data") != payload:
+                silently_wrong += 1
+        assert silently_wrong == 0
+        # The corruption has to actually reach the solution sometimes, or this
+        # test proves nothing.
+        assert detected > 0
+
+    def test_gist_still_available_when_integrity_fails(self):
+        payload = bytes((i * 13 + 5) % 256 for i in range(600))
+        for seed in range(30):
+            blob = codec.pack_mckay_message(
+                payload, "BINARY", message_id=seed + 1, redundancy=0.05,
+                min_redundancy=1,
+            )
+            result = codec.unpack_stream(self._corrupt_one_atom(blob, seed))
+            if result.get("integrity_ok") is False:
+                # A failed payload still leaves the operator the gist.
+                assert result["gist"]["type"] == "MCKAY"
+                assert result["mckay"]["original_size"] == len(payload)
+                return
+        pytest.fail("no corruption reached the fountain solution")
+
+
+class TestWireFormatStability:
+    """
+    The sampler and the CRCs were rewritten for speed. Both define the wire
+    format and are mirrored by the Rust and C ports, so they must stay
+    bit-identical to the reference definitions.
+    """
+
+    @staticmethod
+    def _dense_sample(seed, n, k):
+        """The original materialised Fisher-Yates, kept as the reference."""
+        from astral.fountain import _Xorshift32
+
+        rng = _Xorshift32(seed)
+        pool = list(range(n))
+        for i in range(k):
+            j = i + (rng.next_u32() % (n - i))
+            pool[i], pool[j] = pool[j], pool[i]
+        return pool[:k]
+
+    def test_prng_test_vector(self):
+        from astral.fountain import _Xorshift32
+
+        assert _Xorshift32(1).next_u32() == 270369
+
+    def test_sparse_sampler_matches_dense_reference(self):
+        from astral.fountain import _Xorshift32
+
+        for seed in range(1, 60):
+            for n in (1, 2, 3, 5, 16, 97, 256, 1000):
+                for k in range(0, min(n, 8) + 1):
+                    assert (
+                        _Xorshift32(seed).sample_indices(n, k)
+                        == self._dense_sample(seed, n, k)
+                    ), f"sampler diverged at seed={seed} n={n} k={k}"
+
+    def test_crc8_matches_bitwise_reference(self):
+        from astral.crc import crc8_j1850
+
+        def reference(data):
+            crc = 0xFF
+            for b in data:
+                crc ^= b
+                for _ in range(8):
+                    crc = (
+                        ((crc << 1) ^ 0x1D) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
+                    )
+            return crc ^ 0xFF
+
+        rng = random.Random(5)
+        cases = [b"", b"\x00", bytes(range(256))]
+        cases += [bytes(rng.randrange(256) for _ in range(rng.randrange(1, 64)))
+                  for _ in range(100)]
+        for data in cases:
+            assert crc8_j1850(data) == reference(data)
+
+    def test_crc16_check_value(self):
+        from astral.crc import crc16_ccitt
+
+        # The published CRC-16/CCITT-FALSE check value, which is the variant
+        # CCSDS uses for the TM frame FECF.
+        assert crc16_ccitt(b"123456789") == 0x29B1
+
+
+class TestLargeMessagePerformance:
+    """
+    Decoding used to rescan every equation for every solved block, which is
+    quadratic and made a few hundred KB impractical. These bounds are loose
+    enough not to flake on a slow machine but tight enough to catch a return
+    to quadratic behaviour, which was 10x slower.
+    """
+
+    def test_large_fountain_roundtrip_is_exact_and_prompt(self):
+        import time
+
+        rng = random.Random(9)
+        K = 1500
+        blocks = [bytes(rng.randrange(256) for _ in range(16)) for _ in range(K)]
+        start = time.perf_counter()
+        packets = lt_encode_blocks(blocks, seed=11, num_packets=K * 2)
+        decoded, fraction = lt_decode_blocks(packets, K, 16)
+        elapsed = time.perf_counter() - start
+        assert fraction == 1.0 and decoded == blocks
+        assert elapsed < 20.0, f"K={K} roundtrip took {elapsed:.1f}s"
+
+    def test_200kb_message_roundtrip(self):
+        import time
+
+        rng = random.Random(3)
+        payload = bytes(rng.randrange(256) for _ in range(200_000))
+        start = time.perf_counter()
+        stream = codec.pack_mckay_message(payload, "BINARY", redundancy=0.3)
+        result = codec.unpack_mckay_stream(stream)
+        elapsed = time.perf_counter() - start
+        assert result["data"] == payload
+        assert result["integrity_ok"] is True
+        assert elapsed < 60.0, f"200 KB roundtrip took {elapsed:.1f}s"

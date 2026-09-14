@@ -9,6 +9,7 @@ from astral.container import (
     SYNC1,
     make_atom,
     parse_atoms,
+    ATOM_VERSION,
 )
 
 
@@ -33,12 +34,13 @@ class TestMakeAtom:
         )
         parsed = parse_atoms(atom)
         assert len(parsed) == 1
-        idx, total, mid, typ, pl = parsed[0]
-        assert idx == 5
-        assert total == 10
-        assert mid == 0x1234
-        assert typ == FOUNTAIN_PACKET
-        assert pl == payload
+        atom_out = parsed[0]
+        assert atom_out.atom_index == 5
+        assert atom_out.total_atoms == 10
+        assert atom_out.message_id == 0x1234
+        assert atom_out.atom_type == FOUNTAIN_PACKET
+        assert atom_out.payload == payload
+        assert atom_out.version == ATOM_VERSION
 
     def test_short_payload_padded(self):
         atom = make_atom(0, 1, 1, HEADER_GIST, b"short")
@@ -72,10 +74,10 @@ class TestParseAtoms:
         )
         parsed = parse_atoms(atoms)
         assert len(parsed) == 5
-        for i, (idx, total, mid, typ, _) in enumerate(parsed):
-            assert idx == i
-            assert total == 5
-            assert mid == 0xABCD
+        for i, atom_out in enumerate(parsed):
+            assert atom_out.atom_index == i
+            assert atom_out.total_atoms == 5
+            assert atom_out.message_id == 0xABCD
 
     def test_empty_stream(self):
         assert parse_atoms(b"") == []

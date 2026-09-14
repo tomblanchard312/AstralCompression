@@ -1,3 +1,5 @@
+from typing import NamedTuple
+
 from .crc import crc8_j1850
 
 SYNC0 = 0xA5
@@ -9,6 +11,22 @@ FOUNTAIN_PACKET = 1
 DICT_UPDATE = 2
 MCKAY_GIST = 3  # McKay compression metadata (see codec.pack_mckay_message)
 
+# Atom format version, carried in byte 2.
+#   1: original format
+#   2: the header atom carries a CRC-32 of the assembled payload
+ATOM_VERSION = 2
+
+
+class Atom(NamedTuple):
+    """One parsed atom. Indexes 0-4 match the historical 5-tuple layout."""
+
+    atom_index: int
+    total_atoms: int
+    message_id: int
+    atom_type: int
+    payload: bytes
+    version: int
+
 
 def make_atom(
     atom_index,
@@ -16,7 +34,7 @@ def make_atom(
     message_id,
     atom_type,
     payload21: bytes,
-    version_flags=0x01,
+    version_flags=ATOM_VERSION,
 ) -> bytes:
     # Input validation
     if not isinstance(atom_index, int) or atom_index < 0 or atom_index > 65535:
@@ -73,11 +91,15 @@ def parse_atoms(stream: bytes):
         if (crc8_j1850(chunk[:31]) & 0xFF) != chunk[31]:
             i += 1
             continue
-        idx = chunk[3] | (chunk[4] << 8)
-        total = chunk[5] | (chunk[6] << 8)
-        msg_id = chunk[7] | (chunk[8] << 8)
-        typ = chunk[9]
-        payload21 = bytes(chunk[10:31])
-        out.append((idx, total, msg_id, typ, payload21))
+        out.append(
+            Atom(
+                atom_index=chunk[3] | (chunk[4] << 8),
+                total_atoms=chunk[5] | (chunk[6] << 8),
+                message_id=chunk[7] | (chunk[8] << 8),
+                atom_type=chunk[9],
+                payload=bytes(chunk[10:31]),
+                version=chunk[2],
+            )
+        )
         i += ATOM_SIZE
     return out

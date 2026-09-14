@@ -1,5 +1,6 @@
 import random
-from astral.codec import pack_message, unpack_stream
+
+from astral.codec import header_redundancy_for, pack_message, unpack_stream
 
 
 def test_roundtrip():
@@ -28,13 +29,20 @@ def test_lossy():
         "depth_m": 5.5,
         "conf": 0.8,
     }
-    blob = pack_message(msg, extra_fountain=10)
+    drop = 0.4
+    # Size the header replication for the loss being simulated: the gist lives
+    # only in the header atoms, so with the default 4 copies this assertion
+    # fails roughly once every 40 runs purely by chance.
+    blob = pack_message(
+        msg, extra_fountain=10, header_redundancy=header_redundancy_for(drop)
+    )
+    rng = random.Random(1234)
     lossy = bytearray()
     for i in range(0, len(blob), 32):
         atom = blob[i : i + 32]
         if len(atom) < 32:
             break
-        if random.random() >= 0.4:
+        if rng.random() >= drop:
             lossy += atom
     out = unpack_stream(bytes(lossy))
     assert "gist" in out

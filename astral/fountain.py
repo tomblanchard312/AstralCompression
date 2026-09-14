@@ -44,18 +44,31 @@ class _Xorshift32:
         Return a list of k distinct indices chosen from range(n),
         using a Fisher-Yates partial shuffle seeded from this RNG.
         Equivalent to random.sample(range(n), k) but portable.
+
+        The shuffle is done over a sparse dict rather than a materialised
+        ``list(range(n))``: only the positions actually touched are stored, so
+        drawing a degree-3 packet from 20,000 blocks costs three operations
+        instead of twenty thousand. The draw sequence, and therefore the wire
+        format, is identical to the dense version.
         """
         if k < 0 or k > n:
             raise ValueError(f"sample size {k} out of range for population {n}")
         if k == 0:
             return []
 
-        # Build a mutable pool and partial-shuffle the first k positions.
-        pool = list(range(n))
+        pool: dict = {}
+        get = pool.get
+        next_u32 = self.next_u32
+        out = []
+        append = out.append
         for i in range(k):
-            j = i + (self.next_u32() % (n - i))
-            pool[i], pool[j] = pool[j], pool[i]
-        return pool[:k]
+            j = i + (next_u32() % (n - i))
+            vi = get(i, i)
+            vj = get(j, j)
+            pool[i] = vj
+            pool[j] = vi
+            append(vj)
+        return out
 
 
 def _ideal_soliton(K):
@@ -140,6 +153,12 @@ def lt_encode_blocks(blocks, seed, num_packets, c=0.1, delta=0.05):
     rnd = _Xorshift32(seed)
     dist = _robust_soliton(K, c, delta)
 
+    # XOR whole blocks as big integers rather than byte by byte. Python's
+    # bignum XOR runs in C over machine words, which is roughly an order of
+    # magnitude faster than a per-byte loop for a 16-byte symbol and scales
+    # better for larger ones.
+    block_ints = [int.from_bytes(b, "big") for b in blocks]
+
     packets = []
     for _ in range(num_packets):
         # Generate deterministic packet seed
@@ -153,62 +172,56 @@ def lt_encode_blocks(blocks, seed, num_packets, c=0.1, delta=0.05):
         # Use sampling without replacement for better distribution
         indices = packet_rng.sample_indices(K, degree)
 
-        # XOR selected blocks
-        encoded_block = bytearray(block_size)
+        acc = 0
         for idx in indices:
-            block = blocks[idx]
-            for j in range(block_size):
-                encoded_block[j] ^= block[j]
+            acc ^= block_ints[idx]
 
-        packets.append((packet_seed, degree, bytes(encoded_block)))
+        packets.append(
+            (packet_seed, degree, acc.to_bytes(block_size, "big"))
+        )
 
     return packets
-
-
-def _xor_into(dst: bytearray, src) -> None:
-    for i in range(len(dst)):
-        dst[i] ^= src[i]
 
 
 def _gaussian_eliminate(equations, solved: dict, symbol_size: int) -> None:
     """
     Solve the residual system left by peeling, in place, over GF(2).
 
-    Each equation is ``(set_of_block_indices, data)``. Equations are reduced
-    against a pivot set keyed by their lowest remaining index; anything that
-    reduces to the empty set is redundant and dropped. Back substitution then
-    runs from the highest pivot down, which is safe because a pivot is by
-    construction the smallest index in its own equation.
+    Each equation is ``[set_of_block_indices, value]`` where ``value`` is the
+    symbol as a big integer. Equations are reduced against a pivot set keyed by
+    their lowest remaining index; anything that reduces to the empty set is
+    redundant and dropped. Back substitution then runs from the highest pivot
+    down, which is safe because a pivot is by construction the smallest index
+    in its own equation.
 
     Newly recovered blocks are added to ``solved``.
     """
     pivots: dict = {}
 
-    for indices, data in equations:
+    for indices, value in equations:
         cur = set(indices)
-        cur_data = bytearray(data)
+        cur_value = value
 
         # Fold in everything peeling already recovered.
-        for idx in list(cur):
-            if idx in solved:
-                cur.discard(idx)
-                _xor_into(cur_data, solved[idx])
+        for idx in cur & solved.keys():
+            cur_value ^= solved[idx]
+        cur -= solved.keys()
 
         while cur:
             p = min(cur)
             pivot = pivots.get(p)
             if pivot is None:
-                pivots[p] = (cur, cur_data)
+                pivots[p] = (cur, cur_value)
                 break
-            p_indices, p_data = pivot
+            p_indices, p_value = pivot
             cur ^= p_indices
-            _xor_into(cur_data, p_data)
+            cur_value ^= p_value
         # An empty `cur` means the packet was linearly dependent: no new
         # information, nothing to record.
 
     for p in sorted(pivots, reverse=True):
-        p_indices, p_data = pivots[p]
-        value = bytearray(p_data)
+        p_indices, p_value = pivots[p]
+        value = p_value
         resolvable = True
         for idx in p_indices:
             if idx == p:
@@ -217,9 +230,9 @@ def _gaussian_eliminate(equations, solved: dict, symbol_size: int) -> None:
             if known is None:
                 resolvable = False
                 break
-            _xor_into(value, known)
+            value ^= known
         if resolvable and p not in solved:
-            solved[p] = bytes(value[:symbol_size])
+            solved[p] = value & ((1 << (symbol_size * 8)) - 1)
 
 
 def lt_decode_blocks(packets, K, symbol_size, c=0.1, delta=0.05):
@@ -248,29 +261,39 @@ def lt_decode_blocks(packets, K, symbol_size, c=0.1, delta=0.05):
         # Get same indices as encoder
         indices = packet_rng.sample_indices(K, degree)
 
-        equations.append((set(indices), bytearray(data)))
+        equations.append([set(indices), int.from_bytes(data, "big")])
 
-    # Stage 1: belief-propagation peeling. Cheap, and resolves the common case.
+    # Stage 1: belief-propagation peeling.
+    #
+    # Equations are indexed by the unknowns they still contain, so resolving a
+    # block touches only the equations that actually mention it. The previous
+    # implementation rescanned every equation for every solved block, which is
+    # O(M*K) and dominated decode time for anything but tiny messages.
+    containing: dict = {}
+    for eq in equations:
+        for idx in eq[0]:
+            containing.setdefault(idx, []).append(eq)
+
     solved: dict = {}
+    ready = [eq for eq in equations if len(eq[0]) == 1]
 
-    while True:
-        progress = False
+    while ready:
+        indices, value = ready.pop()
+        if len(indices) != 1:
+            continue
+        idx = next(iter(indices))
+        if idx in solved:
+            continue
+        solved[idx] = value
 
-        # Find degree-1 equations
-        for i, (indices, data) in enumerate(equations):
-            if len(indices) == 1:
-                idx = next(iter(indices))
-                if idx not in solved:
-                    solved[idx] = bytes(data)
-                    progress = True
-                    for j, (other_indices, other_data) in enumerate(equations):
-                        if i != j and idx in other_indices:
-                            other_indices.remove(idx)
-                            for k in range(len(other_data)):
-                                other_data[k] ^= data[k]
-
-        if not progress:
-            break
+        for eq in containing.get(idx, ()):
+            if eq[0] is indices or idx not in eq[0]:
+                continue
+            eq[0].discard(idx)
+            eq[1] ^= value
+            if len(eq[0]) == 1:
+                ready.append(eq)
+        containing.pop(idx, None)
 
     # Stage 2: full Gaussian elimination over GF(2) on whatever peeling left
     # behind. Peeling alone stalls whenever the residual graph has no degree-1
@@ -280,9 +303,9 @@ def lt_decode_blocks(packets, K, symbol_size, c=0.1, delta=0.05):
 
     # Prepare result
     decoded_blocks = [None] * K
-    for idx, block in solved.items():
+    for idx, value in solved.items():
         if 0 <= idx < K:
-            decoded_blocks[idx] = block
+            decoded_blocks[idx] = value.to_bytes(symbol_size, "big")
 
     recovery_fraction = len(solved) / K
 

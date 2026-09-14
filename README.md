@@ -140,6 +140,21 @@ stream = pack_mckay_message(
 The default scales with message size (at least 4 copies, at least 10% of the
 fountain atom count), which is sized for ordinary links, not for 80% loss.
 
+### Throughput (pure Python, no Rust extension)
+
+| Operation | Rate |
+|---|---|
+| `pack_mckay_message`, 200 KB binary | ~0.45 s |
+| `unpack_mckay_stream`, 200 KB | ~0.57 s |
+| TM framing / deframing | ~13 MB/s |
+| Fountain encode, K=2000, 4000 packets | 27 ms |
+| Fountain decode, K=2000 | 40 ms |
+
+The fountain layer XORs symbols as big integers, indexes equations by unknown
+rather than rescanning, and draws packet indices from a sparse shuffle; the
+CRCs are table-driven. Together those took a 200 KB message from 3.9 s to
+0.45 s without changing a byte of the wire format.
+
 ### Fountain overhead
 
 Packets needed to recover K source blocks, measured over 20 seeds per K:
@@ -161,7 +176,7 @@ An atom is 32 bytes:
 | Bytes | Field |
 |---|---|
 | 0-1 | sync `0xA5 0xE6` |
-| 2 | version + flags (v1) |
+| 2 | atom format version (2: header carries a payload CRC-32) |
 | 3-4 | atom_index (uint16 LE) |
 | 5-6 | total_atoms (uint16 LE) |
 | 7-8 | message_id (uint16 LE) |
@@ -170,8 +185,8 @@ An atom is 32 bytes:
 | 31 | CRC-8/J1850 over bytes 0-30 |
 
 - **HEADER_GIST** carries source block count K, symbol size (16), payload
-  length, fountain seed, and the packed gist bits. It is replicated; see
-  `header_redundancy_for`.
+  length, fountain seed, the packed gist bits, and a CRC-32 of the assembled
+  payload. It is replicated; see `header_redundancy_for`.
 - **MCKAY_GIST** carries the McKay version, transform, data type, original and
   compressed sizes, channel count and entropy coder. Also replicated.
 - **FOUNTAIN_PACKET** carries a packet seed, degree and a 16-byte XOR block.
@@ -181,6 +196,28 @@ An atom is 32 bytes:
 A single message is limited by the 16-bit atom counters to roughly 512 KB of
 payload; `codec.max_payload_bytes()` returns the exact figure and oversized
 input raises rather than wrapping.
+
+### End-to-end integrity
+
+Each atom carries a CRC-8, which rejects 255 of every 256 corrupt atoms. The
+one that slips through is XORed into the reconstruction and silently changes
+the payload, so the header also carries a CRC-32 over the assembled payload
+and the decoder checks it before reporting success:
+
+```python
+result = unpack_stream(stream)
+result["integrity_ok"]   # True, False, or None for a pre-v2 stream
+```
+
+A failed check is reported as `complete: False` with an `error`, never as a
+decode. The gist still comes back, so an operator learns what was sent and
+that it arrived damaged. Measured on 600-byte payloads where one corrupt atom
+reaches the solution: the check catches it, and of those cases the unchecked
+path would have returned wrong bytes as a clean decode about two thirds of
+the time (the rest raised inside the decompressor).
+
+Note that CRC-32 is an error-detecting code, not an authenticator. It catches
+noise, not tampering; use `pack-cmd --key` for authenticated commands.
 
 ## Space communications standards
 
@@ -300,7 +337,7 @@ reports per-dataset timings, ratios and an average speedup.
 
 ```bash
 pip install pytest reedsolo numpy
-python -m pytest tests            # 179 passed, 19 skipped without the Rust extension
+python -m pytest tests            # 190 passed, 19 skipped without the Rust extension
 python -m flake8 astral/ tests/ *.py --config=setup.cfg
 ```
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import os
 import struct
+import zlib
 from .container import make_atom, parse_atoms
 from .container import HEADER_GIST, FOUNTAIN_PACKET, DICT_UPDATE, MCKAY_GIST
 from .grammar import make_gist_bits, encode_payload, decode_payload
@@ -78,7 +79,8 @@ def _resolve_header_redundancy(header_redundancy, fountain_atoms: int) -> int:
     return max(HEADER_REDUNDANCY, math.ceil(HEADER_FRACTION * fountain_atoms))
 
 
-GIST_ROOM = 21 - 11  # bytes left in the header atom after the fountain fields
+GIST_ROOM = 5  # bytes the 33-bit gist occupies in the header atom
+PAYLOAD_CRC_OFFSET = 16  # header bytes 16-19: CRC-32 of the assembled payload
 
 
 def max_payload_bytes(min_redundancy: int = 10, extra_fountain: int = 0) -> int:
@@ -119,8 +121,14 @@ def _build_header(
     K: int,
     fountain_seed: int,
     payload_len: int,
+    payload_crc: int = 0,
 ) -> bytes:
-    """Assemble the 21-byte HEADER_GIST payload shared by every pack_* call."""
+    """
+    Assemble the 21-byte HEADER_GIST payload shared by every pack_* call.
+
+    Layout: K(2) symbol_size(1) seed(4) payload_len(3) gist_bits(1)
+    gist(5) payload_crc32(4), little-endian throughout.
+    """
     header = bytearray(21)
     header[0] = K & 0xFF
     header[1] = (K >> 8) & 0xFF
@@ -131,6 +139,9 @@ def _build_header(
     header[9] = (payload_len >> 16) & 0xFF
     header[10] = gist_bits & 0xFF
     header[11 : 11 + min(len(gist_bytes), GIST_ROOM)] = gist_bytes[:GIST_ROOM]
+    header[PAYLOAD_CRC_OFFSET : PAYLOAD_CRC_OFFSET + 4] = (
+        payload_crc & 0xFFFFFFFF
+    ).to_bytes(4, "little")
     return bytes(header)
 
 
@@ -207,7 +218,9 @@ def pack_text_with_dict(
     blocks = chunk_blocks(payload, SYMBOL_SIZE)
     K = len(blocks)
     fountain_seed = int.from_bytes(os.urandom(4), "little") or 1
-    header = _build_header(gist_bytes, gist_bits, K, fountain_seed, len(payload))
+    header = _build_header(
+        gist_bytes, gist_bits, K, fountain_seed, len(payload), zlib.crc32(payload)
+    )
 
     # The header is replicated: if every copy is lost there is no gist and no
     # fountain parameters, so this is the floor on surviving heavy loss.
@@ -335,7 +348,9 @@ def _pack_with_custom_payload(
     blocks = chunk_blocks(payload, SYMBOL_SIZE)
     K = len(blocks)
     fountain_seed = int.from_bytes(os.urandom(4), "little") or 1
-    header = _build_header(gist_bytes, gist_bits, K, fountain_seed, len(payload))
+    header = _build_header(
+        gist_bytes, gist_bits, K, fountain_seed, len(payload), zlib.crc32(payload)
+    )
 
     M = fountain_atom_count(K, min_redundancy, redundancy, extra_fountain)
     n_header = _resolve_header_redundancy(header_redundancy, M)
@@ -522,17 +537,19 @@ def unpack_stream(stream: bytes):
     if not atoms:
         return {"error": "no valid atoms"}
 
-    msg_id = atoms[0][2]
+    msg_id = atoms[0].message_id
     header_atom = None
     mckay_atom = None
     fountain_atoms = []
     dict_atoms = []
-    total_atoms = atoms[0][1]
-    for idx, total, mid, typ, payload in atoms:
+    total_atoms = atoms[0].total_atoms
+    atom_version = atoms[0].version
+    for _idx, total, mid, typ, payload, version in atoms:
         if mid != msg_id:
             continue
         total_atoms = total
         if typ == HEADER_GIST and header_atom is None:
+            atom_version = version
             header_atom = payload
         elif typ == FOUNTAIN_PACKET:
             fountain_atoms.append(payload)
@@ -548,12 +565,20 @@ def unpack_stream(stream: bytes):
     symbol_size = header_atom[2]
     payload_len = header_atom[7] | (header_atom[8] << 8) | (header_atom[9] << 16)
     gist_bits = header_atom[10]
-    gist_room = 21 - 11
     # Calculate how many bytes the gist bits actually occupy
     gist_bytes_needed = (gist_bits + 7) // 8
-    gist_bytes = header_atom[11 : 11 + min(gist_bytes_needed, gist_room)]
+    gist_bytes = header_atom[11 : 11 + min(gist_bytes_needed, GIST_ROOM)]
 
     gist = parse_gist(gist_bytes, gist_bits)
+
+    # Atom format 2 onward carries a CRC-32 of the assembled payload, so a
+    # corrupt atom that slipped past its own CRC-8 cannot be reported as a
+    # clean decode.
+    expected_crc = None
+    if atom_version >= 2:
+        expected_crc = int.from_bytes(
+            header_atom[PAYLOAD_CRC_OFFSET : PAYLOAD_CRC_OFFSET + 4], "little"
+        )
 
     packets = []
     for p in fountain_atoms:
@@ -567,12 +592,36 @@ def unpack_stream(stream: bytes):
     message = None
     mckay_gist = _parse_mckay_gist(mckay_atom) if mckay_atom is not None else None
     decompressed = None
+    integrity = None
 
     if packets:
         recovered, frac = lt_decode_blocks(packets, K, symbol_size)
         recovered_fraction = frac
         if recovered is not None:
             payload = b"".join(recovered)[:payload_len]
+            if expected_crc is not None:
+                integrity = zlib.crc32(payload) == expected_crc
+                if not integrity:
+                    # The blocks solved, but they do not reconstruct the payload
+                    # that was sent. Reporting this as a decode would hand the
+                    # caller silently wrong data.
+                    return {
+                        "message_id": msg_id,
+                        "total_atoms": total_atoms,
+                        "received_atoms": len(atoms),
+                        "gist": gist,
+                        "mckay": mckay_gist,
+                        "complete": False,
+                        "recovered_fraction": recovered_fraction,
+                        "message": None,
+                        "data": None,
+                        "integrity_ok": False,
+                        "error": (
+                            "payload integrity check failed: the atoms "
+                            "reassembled but the CRC-32 does not match the "
+                            "header. At least one atom was corrupt."
+                        ),
+                    }
             try:
                 mtype = gist.get("type")
                 if dict_atoms:
@@ -620,6 +669,7 @@ def unpack_stream(stream: bytes):
         "recovered_fraction": recovered_fraction,
         "message": message,
         "data": decompressed,
+        "integrity_ok": integrity,
     }
 
 
