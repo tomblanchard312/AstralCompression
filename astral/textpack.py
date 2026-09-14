@@ -6,7 +6,14 @@
 #
 # This is a *starter*; you can swap in ANS/Huffman later while keeping the
 # container the same.
+
+# Required for the PEP 604 annotations below: `X | None` in a signature is
+# evaluated at def time, so without this the module fails to import on the
+# Python 3.9 the package declares support for.
+from __future__ import annotations
+
 import re
+
 from .varint import leb128_encode, leb128_decode
 
 BASE_LEXICON = [

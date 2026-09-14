@@ -699,3 +699,44 @@ class TestLargeMessagePerformance:
         assert result["data"] == payload
         assert result["integrity_ok"] is True
         assert elapsed < 60.0, f"200 KB roundtrip took {elapsed:.1f}s"
+
+
+class TestPythonVersionSupport:
+    """
+    pyproject declares `requires-python = ">=3.9"`. PEP 604 unions (`X | None`)
+    and PEP 585 builtin generics are evaluated at definition time when they
+    appear in a signature, so a module using them without
+    `from __future__ import annotations` fails to import on 3.9 even though it
+    parses fine. That is invisible on a modern interpreter and broke the 3.9
+    CI leg.
+    """
+
+    def test_no_runtime_evaluated_pep604_unions(self):
+        import pathlib
+        import re as _re
+
+        package = pathlib.Path(__file__).resolve().parent.parent / "astral"
+        offenders = []
+        signature = _re.compile(r"^\s*def .*\|", _re.MULTILINE)
+        for path in sorted(package.glob("*.py")):
+            source = path.read_text(encoding="utf-8")
+            if "from __future__ import annotations" in source:
+                continue
+            for match in signature.finditer(source):
+                line = match.group(0).strip()
+                if "|" in line.split("#")[0]:
+                    offenders.append(f"{path.name}: {line}")
+        assert not offenders, (
+            "these signatures are evaluated at import and need "
+            "`from __future__ import annotations` for Python 3.9: "
+            + "; ".join(offenders)
+        )
+
+    def test_declared_minimum_python_is_still_3_9(self):
+        import pathlib
+
+        pyproject = (
+            pathlib.Path(__file__).resolve().parent.parent / "pyproject.toml"
+        ).read_text(encoding="utf-8")
+        # If this is ever raised, the guard above can be relaxed to match.
+        assert 'requires-python = ">=3.9"' in pyproject
