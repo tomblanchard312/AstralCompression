@@ -148,7 +148,7 @@ def test_text_messages():
     result = unpack_stream(blob)
     assert result["complete"] is True, "Text should decode completely"
     assert result["message"]["type"] == "TEXT", "Should be TEXT type"  # type: ignore
-    expected = "hello from ASTRAL: nominal link, standing by."
+    expected = text
     assert result["message"]["text"] == expected, (  # type: ignore
         f"Text mismatch.\nExpected: {expected!r}\n"
         f"Got:      {result['message']['text']!r}"  # type: ignore

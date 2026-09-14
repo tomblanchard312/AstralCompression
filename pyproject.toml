@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astral-compression"
-version = "0.6.0"
+version = "0.7.0"
 description = "Extreme compression and loss-tolerant messaging for deep-space RF links"
 readme = "README.md"
 license = { text = "MIT" }

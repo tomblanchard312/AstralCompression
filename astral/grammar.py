@@ -21,6 +21,7 @@ DICT_TYPE = {
     "VOICE": 4,
     "CMD": 5,
     "CMD_BATCH": 6,
+    "MCKAY": 7,
 }
 
 _INV_TYPE = {v: k for k, v in DICT_TYPE.items()}

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import math
 import os
 import struct
 from .container import make_atom, parse_atoms
-from .container import HEADER_GIST, FOUNTAIN_PACKET
+from .container import HEADER_GIST, FOUNTAIN_PACKET, DICT_UPDATE, MCKAY_GIST
 from .grammar import make_gist_bits, encode_payload, decode_payload
 from .grammar import parse_gist
 from .textpack import encode_text, decode_text
@@ -19,6 +20,130 @@ from .fountain import lt_encode_blocks, lt_decode_blocks
 
 SYMBOL_SIZE = 16  # bytes per source block for the fountain code
 HEADER_REDUNDANCY = 4  # replicate header atoms to reduce header-loss failures
+MAX_ATOMS = 65535  # atom_index/total_atoms are 16-bit fields
+HEADER_FRACTION = 0.1  # header copies as a share of the fountain atom count
+
+
+def header_redundancy_for(loss_rate: float, confidence: float = 0.99) -> int:
+    """
+    Header copies needed to keep the gist alive at a given loss rate.
+
+    The gist and the fountain parameters live only in the header atom, so if
+    every copy is dropped the receiver gets nothing at all. With independent
+    losses, n copies survive with probability ``1 - loss_rate**n``; this
+    returns the smallest n meeting ``confidence``.
+
+    At 80% loss, 99% confidence needs 21 copies, which is 672 bytes: cheap
+    next to losing the message.
+    """
+    if not 0.0 <= loss_rate < 1.0:
+        raise ValueError("loss_rate must be in [0, 1)")
+    if not 0.0 < confidence < 1.0:
+        raise ValueError("confidence must be in (0, 1)")
+    if loss_rate == 0.0:
+        return 1
+    return max(1, math.ceil(math.log(1.0 - confidence) / math.log(loss_rate)))
+
+
+def fountain_atom_count(
+    K: int,
+    min_redundancy: int = 10,
+    redundancy: float = 1.0,
+    extra_fountain: int = 0,
+) -> int:
+    """
+    Number of fountain atoms to emit for K source blocks.
+
+    ``redundancy`` is the proportional overhead: 1.0 (the default) sends twice
+    the payload, 0.3 sends 30% extra. The decoder peels and then eliminates,
+    so large messages recover from about 5% overhead; small ones need more,
+    which is what ``min_redundancy`` guarantees.
+    """
+    if redundancy < 0:
+        raise ValueError("redundancy must be non-negative")
+    return (
+        K
+        + max(int(min_redundancy), math.ceil(K * float(redundancy)))
+        + int(extra_fountain)
+    )
+
+
+def _resolve_header_redundancy(header_redundancy, fountain_atoms: int) -> int:
+    """Default header replication, scaled with message size."""
+    if header_redundancy is not None:
+        n = int(header_redundancy)
+        if n < 1:
+            raise ValueError("header_redundancy must be >= 1")
+        return n
+    return max(HEADER_REDUNDANCY, math.ceil(HEADER_FRACTION * fountain_atoms))
+
+
+GIST_ROOM = 21 - 11  # bytes left in the header atom after the fountain fields
+
+
+def max_payload_bytes(min_redundancy: int = 10, extra_fountain: int = 0) -> int:
+    """
+    Largest payload that still fits inside the 16-bit atom counters.
+
+    A payload of K blocks is sent as ``HEADER_REDUNDANCY`` header atoms plus
+    ``K + max(min_redundancy, K) + extra_fountain`` fountain atoms, so the
+    limit is roughly a quarter of a million source blocks' worth once the
+    redundancy is accounted for.
+    """
+    budget = MAX_ATOMS - HEADER_REDUNDANCY - int(extra_fountain)
+    if budget <= 0:
+        return 0
+    # K + max(min_redundancy, K) <= budget. For K >= min_redundancy that is
+    # 2K <= budget.
+    k = budget // 2
+    if k < int(min_redundancy):
+        k = max(0, budget - int(min_redundancy))
+    return k * SYMBOL_SIZE
+
+
+def _check_payload_size(
+    payload_len: int, min_redundancy: int = 10, extra_fountain: int = 0
+) -> None:
+    limit = max_payload_bytes(min_redundancy, extra_fountain)
+    if payload_len > limit:
+        raise ValueError(
+            f"payload too large for a single ASTRAL message: {payload_len} "
+            f"bytes (max {limit} at this redundancy). Split it across "
+            f"messages."
+        )
+
+
+def _build_header(
+    gist_bytes: bytes,
+    gist_bits: int,
+    K: int,
+    fountain_seed: int,
+    payload_len: int,
+) -> bytes:
+    """Assemble the 21-byte HEADER_GIST payload shared by every pack_* call."""
+    header = bytearray(21)
+    header[0] = K & 0xFF
+    header[1] = (K >> 8) & 0xFF
+    header[2] = SYMBOL_SIZE & 0xFF
+    header[3:7] = fountain_seed.to_bytes(4, "little")
+    header[7] = payload_len & 0xFF
+    header[8] = (payload_len >> 8) & 0xFF
+    header[9] = (payload_len >> 16) & 0xFF
+    header[10] = gist_bits & 0xFF
+    header[11 : 11 + min(len(gist_bytes), GIST_ROOM)] = gist_bytes[:GIST_ROOM]
+    return bytes(header)
+
+
+def _fountain_atom_payloads(blocks, fountain_seed: int, M: int):
+    """Yield the 21-byte payloads for M fountain atoms."""
+    for seed, degree, block in lt_encode_blocks(
+        blocks, seed=fountain_seed, num_packets=M
+    ):
+        p = bytearray(21)
+        p[0:4] = seed.to_bytes(4, "little")
+        p[4] = degree & 0xFF
+        p[5:21] = block[:16]
+        yield bytes(p)
 
 
 def chunk_blocks(payload: bytes, symbol_size: int):
@@ -38,6 +163,8 @@ def pack_message(
     message_id: int | None = None,
     extra_fountain: int = 0,
     min_redundancy: int = 10,
+    header_redundancy: int | None = None,
+    redundancy: float = 1.0,
 ) -> bytes:
     # Input validation
     if not isinstance(msg, dict):
@@ -50,49 +177,15 @@ def pack_message(
     if message_id is None:
         message_id = int.from_bytes(os.urandom(2), "little") or 1
 
-    # 1) Build gist and payload
-    gist_bytes, gist_bits = make_gist_bits(msg)
-    payload = encode_payload(msg)
-    payload_len = len(payload)
-    blocks = chunk_blocks(payload, SYMBOL_SIZE)
-    K = len(blocks)
-    fountain_seed = int.from_bytes(os.urandom(4), "little") or 1
-    header = bytearray(21)
-    header[0] = K & 0xFF
-    header[1] = (K >> 8) & 0xFF
-    header[2] = SYMBOL_SIZE & 0xFF
-    header[3:7] = fountain_seed.to_bytes(4, "little")
-    if payload_len > 0xFFFFFF:
-        raise ValueError(
-            f"payload too large for ASTRAL header: {payload_len} bytes "
-            f"(max 16,777,215)"
-        )
-    header[7] = payload_len & 0xFF
-    header[8] = (payload_len >> 8) & 0xFF
-    header[9] = (payload_len >> 16) & 0xFF
-    header[10] = gist_bits & 0xFF
-    gist_room = 21 - 11
-    header[11 : 11 + min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
-
-    atoms = []
-    for _ in range(HEADER_REDUNDANCY):
-        atoms.append((len(atoms), HEADER_GIST, bytes(header)))
-
-    # 4) Fountain packets with adaptive minimum redundancy.
-    M = K + max(int(min_redundancy), K) + int(extra_fountain)
-    packets = lt_encode_blocks(blocks, seed=fountain_seed, num_packets=M)
-    for i, (seed, degree, block) in enumerate(packets, start=len(atoms)):
-        p = bytearray(21)
-        p[0:4] = seed.to_bytes(4, "little")
-        p[4] = degree & 0xFF
-        p[5:21] = block[:16]
-        atoms.append((i, FOUNTAIN_PACKET, bytes(p)))
-
-    total_atoms = len(atoms)
-    out = bytearray()
-    for idx, typ, payload21 in atoms:
-        out += make_atom(idx, total_atoms, message_id, typ, payload21)
-    return bytes(out)
+    return _pack_with_custom_payload(
+        msg,
+        encode_payload(msg),
+        extra_fountain,
+        message_id,
+        min_redundancy,
+        header_redundancy=header_redundancy,
+        redundancy=redundancy,
+    )
 
 
 def pack_text_with_dict(
@@ -101,54 +194,34 @@ def pack_text_with_dict(
     extra_fountain: int = 0,
     message_id: int | None = None,
     min_redundancy: int = 10,
+    header_redundancy: int | None = None,
+    redundancy: float = 1.0,
 ) -> bytes:
     if message_id is None:
         message_id = int.from_bytes(os.urandom(2), "little") or 1
-    # 1) send dict update atoms
+
     msgmeta = {"type": "TEXT", "conf": 0.99}
-    gist_bytes, gist_bits = make_gist_bits(msgmeta)
-    # header with zero payload_len; follow with fountain payload atoms
     payload = encode_text(text)
-    payload_len = len(payload)
+    _check_payload_size(len(payload), min_redundancy, extra_fountain)
+    gist_bytes, gist_bits = make_gist_bits(msgmeta)
     blocks = chunk_blocks(payload, SYMBOL_SIZE)
     K = len(blocks)
     fountain_seed = int.from_bytes(os.urandom(4), "little") or 1
-    header = bytearray(21)
-    header[0] = K & 0xFF
-    header[1] = (K >> 8) & 0xFF
-    header[2] = SYMBOL_SIZE & 0xFF
-    header[3:7] = fountain_seed.to_bytes(4, "little")
-    if payload_len > 0xFFFFFF:
-        raise ValueError(
-            f"payload too large for ASTRAL header: {payload_len} bytes "
-            f"(max 16,777,215)"
-        )
-    header[7] = payload_len & 0xFF
-    header[8] = (payload_len >> 8) & 0xFF
-    header[9] = (payload_len >> 16) & 0xFF
-    header[10] = gist_bits & 0xFF
-    gist_room = 21 - 11
-    header[11 : 11 + min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
-    atoms = []
-    atoms.append((0, HEADER_GIST, bytes(header)))
-    # DICT_UPDATE atoms (insert right after header)
-    for dp in make_dict_update_atoms(words):
-        atoms.append((len(atoms), 2, dp))
+    header = _build_header(gist_bytes, gist_bits, K, fountain_seed, len(payload))
+
+    # The header is replicated: if every copy is lost there is no gist and no
+    # fountain parameters, so this is the floor on surviving heavy loss.
     # Adaptive redundancy floor lets links trade robustness vs throughput.
-    M = K + max(int(min_redundancy), K) + int(extra_fountain)
-    packets = lt_encode_blocks(blocks, seed=fountain_seed, num_packets=M)
-    for i, (seed, degree, block) in enumerate(packets, start=len(atoms)):
-        p = bytearray(21)
-        p[0:4] = seed.to_bytes(4, "little")
-        p[4] = degree & 0xFF
-        p[5:21] = block[:16]
-        atoms.append((i, FOUNTAIN_PACKET, bytes(p)))
-    total_atoms = len(atoms)
-    out = bytearray()
-    # reindex atoms sequentially from 0..N-1 with correct total
-    for new_idx, (old_idx, typ, payload21) in enumerate(atoms):
-        out += make_atom(new_idx, total_atoms, message_id, typ, payload21)
-    return bytes(out)
+    M = fountain_atom_count(K, min_redundancy, redundancy, extra_fountain)
+    n_header = _resolve_header_redundancy(header_redundancy, M)
+    atoms = [(HEADER_GIST, header) for _ in range(n_header)]
+    # DICT_UPDATE atoms travel right behind the header.
+    for dp in make_dict_update_atoms(words):
+        atoms.append((DICT_UPDATE, dp))
+    for p in _fountain_atom_payloads(blocks, fountain_seed, M):
+        atoms.append((FOUNTAIN_PACKET, p))
+
+    return _emit_atoms(atoms, message_id)
 
 
 def pack_text_message(
@@ -156,6 +229,8 @@ def pack_text_message(
     extra_fountain: int = 0,
     message_id: int | None = None,
     min_redundancy: int = 10,
+    header_redundancy: int | None = None,
+    redundancy: float = 1.0,
 ) -> bytes:
     # Input validation
     if not isinstance(text, str):
@@ -170,6 +245,8 @@ def pack_text_message(
         extra_fountain,
         message_id,
         min_redundancy,
+        header_redundancy=header_redundancy,
+        redundancy=redundancy,
     )
 
 
@@ -179,6 +256,8 @@ def pack_cmd_message(
     message_id: int | None = None,
     key: bytes | None = None,
     min_redundancy: int = 10,
+    header_redundancy: int | None = None,
+    redundancy: float = 1.0,
 ) -> bytes:
     payload = encode_cmd(cmd, key=key)
     msg = {"type": "CMD", "conf": 0.99}
@@ -188,6 +267,8 @@ def pack_cmd_message(
         extra_fountain,
         message_id,
         min_redundancy,
+        header_redundancy=header_redundancy,
+        redundancy=redundancy,
     )
 
 
@@ -196,6 +277,8 @@ def pack_voice_message(
     extra_fountain: int = 0,
     message_id: int | None = None,
     min_redundancy: int = 10,
+    header_redundancy: int | None = None,
+    redundancy: float = 1.0,
 ) -> bytes:
     payload = encode_wav_to_bitstream(wav_path)
     msg = {"type": "VOICE", "conf": 0.9}
@@ -205,6 +288,8 @@ def pack_voice_message(
         extra_fountain,
         message_id,
         min_redundancy,
+        header_redundancy=header_redundancy,
+        redundancy=redundancy,
     )
 
 
@@ -214,6 +299,8 @@ def pack_cmd_batch(
     message_id: int | None = None,
     key: bytes | None = None,
     min_redundancy: int = 10,
+    header_redundancy: int | None = None,
+    redundancy: float = 1.0,
 ) -> bytes:
     payload = encode_cmd_batch(batch, key=key)
     msg = {"type": "CMD_BATCH", "conf": 0.99}
@@ -223,6 +310,8 @@ def pack_cmd_batch(
         extra_fountain,
         message_id,
         min_redundancy,
+        header_redundancy=header_redundancy,
+        redundancy=redundancy,
     )
 
 
@@ -232,46 +321,194 @@ def _pack_with_custom_payload(
     extra_fountain: int = 0,
     message_id: int | None = None,
     min_redundancy: int = 10,
+    extra_atoms=None,
+    header_redundancy=None,
+    redundancy: float = 1.0,
 ) -> bytes:
     if message_id is None:
         message_id = int.from_bytes(os.urandom(2), "little") or 1
+    if extra_fountain < 0:
+        raise ValueError("extra_fountain must be non-negative")
+    _check_payload_size(len(payload), min_redundancy, extra_fountain)
+
     gist_bytes, gist_bits = make_gist_bits(msgmeta)
-    payload_len = len(payload)
     blocks = chunk_blocks(payload, SYMBOL_SIZE)
     K = len(blocks)
     fountain_seed = int.from_bytes(os.urandom(4), "little") or 1
-    header = bytearray(21)
-    header[0] = K & 0xFF
-    header[1] = (K >> 8) & 0xFF
-    header[2] = SYMBOL_SIZE & 0xFF
-    header[3:7] = fountain_seed.to_bytes(4, "little")
-    if payload_len > 0xFFFFFF:
-        raise ValueError(
-            f"payload too large for ASTRAL header: {payload_len} bytes "
-            f"(max 16,777,215)"
-        )
-    header[7] = payload_len & 0xFF
-    header[8] = (payload_len >> 8) & 0xFF
-    header[9] = (payload_len >> 16) & 0xFF
-    header[10] = gist_bits & 0xFF
-    gist_room = 21 - 11
-    header[11 : 11 + min(len(gist_bytes), gist_room)] = gist_bytes[:gist_room]
-    atoms = []
-    for _ in range(HEADER_REDUNDANCY):
-        atoms.append((len(atoms), HEADER_GIST, bytes(header)))
-    M = K + max(int(min_redundancy), K) + int(extra_fountain)
-    packets = lt_encode_blocks(blocks, seed=fountain_seed, num_packets=M)
-    for i, (seed, degree, block) in enumerate(packets, start=len(atoms)):
-        p = bytearray(21)
-        p[0:4] = seed.to_bytes(4, "little")
-        p[4] = degree & 0xFF
-        p[5:21] = block[:16]
-        atoms.append((i, FOUNTAIN_PACKET, bytes(p)))
+    header = _build_header(gist_bytes, gist_bits, K, fountain_seed, len(payload))
+
+    M = fountain_atom_count(K, min_redundancy, redundancy, extra_fountain)
+    n_header = _resolve_header_redundancy(header_redundancy, M)
+    atoms = [(HEADER_GIST, header) for _ in range(n_header)]
+    for atom_type, p in extra_atoms or []:
+        # Metadata gists are replicated alongside the header; anything else
+        # (a dictionary update, say) is sent once.
+        copies = n_header if atom_type == MCKAY_GIST else 1
+        atoms.extend([(atom_type, p)] * copies)
+    for p in _fountain_atom_payloads(blocks, fountain_seed, M):
+        atoms.append((FOUNTAIN_PACKET, p))
+
+    return _emit_atoms(atoms, message_id)
+
+
+def _emit_atoms(atoms, message_id: int) -> bytes:
+    """Serialise ``(atom_type, payload21)`` pairs, numbering them 0..N-1."""
     total_atoms = len(atoms)
+    if total_atoms > MAX_ATOMS:
+        raise ValueError(
+            f"message needs {total_atoms} atoms, exceeding the 16-bit limit "
+            f"of {MAX_ATOMS}"
+        )
     out = bytearray()
-    for idx, typ, payload21 in atoms:
+    for idx, (typ, payload21) in enumerate(atoms):
         out += make_atom(idx, total_atoms, message_id, typ, payload21)
     return bytes(out)
+
+
+MCKAY_DATA_TYPES = {
+    "AUTO": 0,
+    "TEXT": 1,
+    "TELEMETRY": 2,
+    "VOICE": 3,
+    "BINARY": 4,
+    "IMAGE": 5,
+}
+_INV_MCKAY_DATA_TYPES = {v: k for k, v in MCKAY_DATA_TYPES.items()}
+
+
+def _mckay_gist_atom(
+    mckay_version: int,
+    transform_id: int,
+    data_type: str,
+    original_size: int,
+    compressed_size: int,
+    channels: int,
+    entropy_coder: int,
+) -> bytes:
+    """
+    Build the 21-byte MCKAY_GIST payload.
+
+    This is the atom that makes the gist-first claim real for compressed
+    payloads: it is replicated like the header, so a receiver that recovers no
+    fountain packets at all still learns what was sent, how big it was and how
+    hard it was squeezed.
+    """
+    p = bytearray(21)
+    p[0] = mckay_version & 0xFF
+    p[1] = transform_id & 0xFF
+    p[2] = MCKAY_DATA_TYPES.get(data_type, 0) & 0xFF
+    p[3:7] = (original_size & 0xFFFFFFFF).to_bytes(4, "little")
+    p[7:11] = (compressed_size & 0xFFFFFFFF).to_bytes(4, "little")
+    p[11] = channels & 0xFF
+    p[12] = entropy_coder & 0xFF
+    return bytes(p)
+
+
+def _parse_mckay_gist(p: bytes) -> dict:
+    original_size = int.from_bytes(p[3:7], "little")
+    compressed_size = int.from_bytes(p[7:11], "little")
+    return {
+        "mckay_version": p[0],
+        "transform_id": p[1],
+        "data_type": _INV_MCKAY_DATA_TYPES.get(p[2], f"TYPE_{p[2]}"),
+        "original_size": original_size,
+        "compressed_size": compressed_size,
+        "channels": p[11],
+        "entropy_coder": p[12],
+        "ratio": round(original_size / compressed_size, 3) if compressed_size else 0.0,
+    }
+
+
+def pack_mckay_message(
+    data: bytes,
+    data_type: str = "AUTO",
+    message_id: int | None = None,
+    extra_fountain: int = 0,
+    min_redundancy: int = 10,
+    voice_bps: int = 1200,
+    channels: int = 0,
+    header_redundancy: int | None = None,
+    redundancy: float = 1.0,
+) -> bytes:
+    """
+    Compress with McKay, then send the result as gist-first atomized packets.
+
+    This is the full McKay + ASTRAL path: domain-aware compression, a
+    replicated metadata gist, and a fountain-coded body, so a lossy link
+    yields the gist first and the exact payload once enough atoms arrive.
+
+    Parameters
+    ----------
+    data : bytes
+        Payload to compress and transmit.
+    data_type : str
+        ``AUTO`` (detect), ``TEXT``, ``TELEMETRY``, ``VOICE``, ``BINARY`` or
+        ``IMAGE``.
+    message_id, extra_fountain, min_redundancy
+        As for :func:`pack_message`.
+    voice_bps, channels
+        Passed through to the McKay compressor.
+
+    Returns
+    -------
+    bytes
+        An ASTRAL atom stream.
+    """
+    from . import mckay_astral_integration as mckay
+
+    if not isinstance(data, bytes):
+        raise TypeError("data must be bytes")
+    if data_type not in MCKAY_DATA_TYPES:
+        raise ValueError(
+            f"data_type must be one of {sorted(MCKAY_DATA_TYPES)}, got {data_type!r}"
+        )
+
+    compressed = mckay.compress(
+        data, data_type=data_type, voice_bps=voice_bps, channels=channels
+    )
+    version, transform_id, orig_len, ch, entropy_coder, _payload = mckay._parse_header(
+        compressed
+    )
+    resolved_type = data_type
+    if resolved_type == "AUTO":
+        resolved_type = mckay._detect_type(data) if data else "BINARY"
+
+    gist_atom = _mckay_gist_atom(
+        version,
+        transform_id,
+        resolved_type,
+        orig_len,
+        len(compressed),
+        ch,
+        entropy_coder,
+    )
+    msgmeta = {"type": "MCKAY", "conf": 0.99}
+    return _pack_with_custom_payload(
+        msgmeta,
+        compressed,
+        extra_fountain,
+        message_id,
+        min_redundancy,
+        extra_atoms=[(MCKAY_GIST, gist_atom)],
+        header_redundancy=header_redundancy,
+        redundancy=redundancy,
+    )
+
+
+def unpack_mckay_stream(stream: bytes) -> dict:
+    """
+    Decode a stream produced by :func:`pack_mckay_message`.
+
+    Returns the same keys as :func:`unpack_stream` plus ``mckay`` (the
+    metadata gist, present whenever any MCKAY_GIST atom survived) and
+    ``data`` (the decompressed bytes, present only on full recovery).
+    """
+    result = unpack_stream(stream)
+    if "error" in result:
+        return result
+    if result.get("mckay") is None:
+        result["error"] = "not a McKay stream: no MCKAY_GIST atom recovered"
+    return result
 
 
 def unpack_stream(stream: bytes):
@@ -287,6 +524,7 @@ def unpack_stream(stream: bytes):
 
     msg_id = atoms[0][2]
     header_atom = None
+    mckay_atom = None
     fountain_atoms = []
     dict_atoms = []
     total_atoms = atoms[0][1]
@@ -294,12 +532,14 @@ def unpack_stream(stream: bytes):
         if mid != msg_id:
             continue
         total_atoms = total
-        if typ == 0 and header_atom is None:
+        if typ == HEADER_GIST and header_atom is None:
             header_atom = payload
-        elif typ == 1:
+        elif typ == FOUNTAIN_PACKET:
             fountain_atoms.append(payload)
-        elif typ == 2:
+        elif typ == DICT_UPDATE:
             dict_atoms.append(payload)
+        elif typ == MCKAY_GIST and mckay_atom is None:
+            mckay_atom = payload
 
     if header_atom is None:
         return {"error": "missing header/gist atom"}
@@ -325,6 +565,8 @@ def unpack_stream(stream: bytes):
     complete = False
     recovered_fraction = 0.0
     message = None
+    mckay_gist = _parse_mckay_gist(mckay_atom) if mckay_atom is not None else None
+    decompressed = None
 
     if packets:
         recovered, frac = lt_decode_blocks(packets, K, symbol_size)
@@ -337,7 +579,16 @@ def unpack_stream(stream: bytes):
                     extra_words = split_words_from_atoms(dict_atoms)
                 else:
                     extra_words = []
-                if mtype == "TEXT":
+                if mckay_gist is not None:
+                    from . import mckay_astral_integration as mckay
+
+                    decompressed = mckay.decompress(payload)
+                    message = {
+                        "type": "MCKAY",
+                        "data_type": mckay_gist["data_type"],
+                        "bytes": decompressed,
+                    }
+                elif mtype == "TEXT":
                     if extra_words:
                         message = {
                             "type": "TEXT",
@@ -364,9 +615,11 @@ def unpack_stream(stream: bytes):
         "total_atoms": total_atoms,
         "received_atoms": len(atoms),
         "gist": gist,
+        "mckay": mckay_gist,
         "complete": complete,
         "recovered_fraction": recovered_fraction,
         "message": message,
+        "data": decompressed,
     }
 
 

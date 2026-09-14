@@ -1,21 +1,24 @@
 """Tests for the Rust astral_compress extension."""
 
-import pytest  # type: ignore[import]
-import numpy as np  # type: ignore[import]
+import lzma
 import struct
 import time
+
+import pytest  # type: ignore[import]
+
+np = pytest.importorskip("numpy", reason="the Rust test suite needs numpy")
 
 # Try to import the Rust extension
 try:
     import astral_compress as ac
 
-    RUST_AVAILABLE = True
+    # The repo root holds an un-built `astral_compress/` source directory that
+    # imports as an empty namespace package, so importability alone does not
+    # mean the extension is present.
+    RUST_AVAILABLE = hasattr(ac, "compress_text")
 except ImportError:
     RUST_AVAILABLE = False
     ac = None
-
-# Import the Python implementation for comparison
-import lzma
 
 
 def py_compress_telemetry(data: bytes, channels: int) -> tuple[int, bytes]:

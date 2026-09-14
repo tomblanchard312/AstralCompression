@@ -1,318 +1,331 @@
 # ASTRAL — Atomic Semantic Tiles with Robust Asynchronous Linking
 
-A tiny, dependency‑free repo for **extreme compression** and **loss‑tolerant**
-message delivery across deep‑space links. ASTRAL focuses on:
-- **Gist-first** frames (meaning survives even under severe loss)
-- **Fountain-coded** payloads (LT code) for dropped-packet retrieval
-- **Atomized packets** (32 bytes) each with CRC‑8 integrity
-- **Controlled grammar** with quantized numbers for high compactness
-- **No external dependencies**, pure Python 3.9+
+Extreme compression and loss-tolerant message delivery for deep-space RF links.
 
-## Repository
+ASTRAL combines three things that are usually kept apart:
+
+- **Domain-aware compression** (the McKay codec): quantised, delta-coded
+  telemetry, byte-reordered float arrays, abbreviation-coded mission text.
+- **Gist-first framing**: a replicated metadata atom, so a receiver learns
+  what was sent even when it recovers none of the body.
+- **Fountain-coded payloads** (LT codes) in fixed 32-byte atoms with CRC-8, so
+  the message reassembles from whatever subset of atoms arrives.
+
+The core is pure Python 3.9+ with no required dependencies. Reed-Solomon,
+Codec2 voice and the Rust fast path are optional extras.
 
 **GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
+**License**: MIT with an attribution requirement. See [LICENSE](LICENSE).
 
-**License**: MIT License with Attribution Requirement - See [LICENSE](LICENSE) for details.
+> **Inspired by**: [Atlantis Data Burst](https://www.gateworld.net/wiki/Atlantis_data_burst).
+> The name is a nod to the fiction; everything below is measured.
 
-## Dr. Rodney McKay's Extreme Compression System
+## Install
 
-![Dr. Rodney McKay](https://upload.wikimedia.org/wikipedia/en/f/f9/RodneyMcKaypic.jpg)
-
-ASTRAL now includes **Dr. Rodney McKay's revolutionary extreme compression algorithm** - achieving compression ratios of **2x to 180x** across multiple data types! This system combines semantic understanding with LZMA compression to create the most efficient deep-space transmission system ever devised.
-
-> **Inspired by**: [Atlantis Data Burst](https://www.gateworld.net/wiki/Atlantis_data_burst) - Dr. McKay's fictional but scientifically-grounded approach to extreme data compression for long-distance space transmission. This implementation brings that concept to reality with modern compression algorithms and fountain codes.
-
-### McKay Compression Features:
-- **Text**: Semantic encoding with space mission vocabulary optimization
-- **Binary**: Pattern recognition and structured data compression
-- **Images**: Visual pattern analysis and metadata optimization  
-- **Voice**: Audio-specific compression with semantic markers
-- **Fountain Code Integration**: Reliable transmission even with 20% packet loss
-
-### Current Implementation Status:
-- **Text + McKay + Fountain**: **100% Working** (3.125x compression)
-- **Binary + McKay + Fountain**: **100% Working** (up to 180x compression)
-- **Images + McKay + Fountain**: **100% Working** (2.84x compression)
-- **Voice + McKay + Fountain**: **100% Working** (GIST-first atomized packets)
-- **GIST-First Architecture**: **100% Operational** (essential metadata survives packet loss)
-- **Atomized Packets**: **100% Operational** (32-byte atoms with CRC-8 integrity)
-
-### Compression Ratios Achieved:
-- **Telemetry Data**: Up to 180x compression!
-- **Image Patterns**: 64x compression
-- **Random Binary**: 27x compression
-- **Text Messages**: 3x compression with semantic preservation
+```bash
+pip install astral-compression            # core, no dependencies
+pip install astral-compression[rs]        # + Reed-Solomon (reedsolo)
+pip install astral-compression[voice]     # + Codec2 voice (pycodec2, numpy)
+pip install astral-compression[fast]      # + Rust extension and zstd
+pip install astral-compression[all]       # everything
+```
 
 ## Quick start
 
-### McKay + ASTRAL System
-- **Full Integration Guide**: [MCKAY_ASTRAL_INTEGRATION.md](MCKAY_ASTRAL_INTEGRATION.md)
-- **Quick Reference**: [QUICK_REFERENCE.md](QUICK_REFERENCE.md)
-- **Use the core CLI**: `python -m astral.cli --help`
-
-### Basic ASTRAL Operations
 ```bash
-# Pack a JSON message to atomized binary
+# Pack a JSON message into atomized binary, lose 40% of it, decode anyway
 python -m astral.cli pack examples/detect.json out.bin
-
-# Simulate 40% random packet loss (drop rate 0.4)
-python -m astral.cli simulate out.bin lossy.bin --drop 0.4
-
-# Try to unpack (even if incomplete, you'll at least get the gist)
+python -m astral.cli simulate out.bin lossy.bin --drop 0.4 --seed 1
 python -m astral.cli unpack lossy.bin
 ```
 
-### McKay + ASTRAL GIST-First System
-Use the maintained `astral.cli` commands shown above for packaging,
-loss simulation, and decoding workflows.
-
-### Maintained Command Set
 ```bash
-# Show available CLI workflows
-python -m astral.cli --help
-
-# Minimal end-to-end atomized flow
-python -m astral.cli pack examples/detect.json out.bin
-python -m astral.cli simulate out.bin lossy.bin --drop 0.4
-python -m astral.cli unpack lossy.bin
-
-# Validate Space Packet wrapper integration
-python PHASE3_SPACEPACKET_VERIFICATION.py
-
-# Run maintained module tests
-python -m pytest tests
+# Compress a file with McKay and send it as gist-first atoms
+python -m astral.cli pack-mckay report.txt out.bin --type TEXT
+python -m astral.cli unpack-mckay out.bin recovered.txt
 ```
 
-## File format (high level)
-- A frame consists of **atoms** of fixed 32‑byte size.
-- Atom layout (bytes):
-  - `[0..1]`: sync `0xA5,0xE6`
-  - `[2]`: version+flags (v1)
-  - `[3..4]`: atom_index (uint16 LE)
-  - `[5..6]`: total_atoms (uint16 LE)
-  - `[7..8]`: message_id (uint16 LE)
-  - `[9]`: atom_type: `0=HEADER_GIST`, `1=FOUNTAIN_PACKET`, `2=DICT_UPDATE (reserved)`
-  - `[10..30]`: payload (21 bytes)
-  - `[31]`: CRC‑8/J1850 over bytes `[0..30]`
-- The **header atom** carries: total source blocks `K`, fixed `symbol_size=16`, payload_len, fountain_seed,
-  gist_len (in bits), and the packed gist bits.
-- The **payload** (grammar‑coded) is split into `K` source blocks of 16 bytes (last padded with zeros).
-- We emit M≥K fountain packets (default equals total_atoms−1). Each packet includes: seed, degree, and XORed block.
+```python
+from astral import pack_mckay_message, unpack_mckay_stream
 
-## GIST-First Architecture: Deep Space Transmission Redefined
-
-### What Makes ASTRAL Revolutionary:
-- **GIST-First Progressive Decoding**: Essential metadata survives even under severe packet loss
-- **Atomized Packet System**: 32-byte atoms with CRC-8 integrity for reliable transmission
-- **McKay + Fountain Integration**: Extreme compression with fountain code redundancy
-- **Progressive Recovery**: Get the gist first, then progressively recover full data
-
-### GIST-First in Action:
-```
-Atom 0: HEADER_GIST (Essential Metadata)
-├── Data type: TEXT/VOICE/BINARY/IMAGE/VIDEO
-├── Confidence: 0.99 (McKay compression)
-├── McKay version: 1.0
-├── Original size: 352,910 bytes
-├── Compressed size: 338,173 bytes
-├── Compression ratio: 1.04x
-└── Fountain parameters: K=21, symbol_size=16
-
-Atoms 1+: FOUNTAIN_PACKET (McKay Data)
-├── Fountain-encoded blocks (16-byte symbols)
-├── Robust redundancy: K + max(10,K) + extra
-├── Progressive recovery with packet loss tolerance
-└── McKay semantic decompression
+stream = pack_mckay_message(open("telemetry.bin", "rb").read(), "TELEMETRY")
+result = unpack_mckay_stream(stream)
+result["mckay"]   # metadata gist: type, sizes, ratio (survives body loss)
+result["data"]    # recovered bytes, once enough atoms arrive
 ```
 
-### Deep Space Transmission Benefits:
-- **Essential Information Survival**: Even with 80% packet loss, you get the gist
-- **Progressive Data Recovery**: Fountain codes recover data progressively
-- **McKay's Extreme Compression**: 2x to 180x compression ratios
-- **Atomic Reliability**: Each 32-byte atom has CRC-8 integrity
-- **No External Dependencies**: Pure Python implementation
+## Measured performance
 
-## Robustness
-- You can drop many atoms at random. If the decoder collects enough fountain packets, it reconstructs the payload.
-- If not, you still get the **gist**: basic type/object/rough location/confidence — often enough to act on.
+Every number below is produced by a script in this repository on the datasets
+those scripts generate. Reproduce with `python mckay_vs_standard.py` and
+`python -m astral.mckay_usage_example`. Expect variation with your data.
 
-## Why “innovative”?
-- ASTRAL combines *semantic gist-first progressive decoding* with a *forward‑error‑resilient* fountain layer,
-  inside a minimal, inspectable, byte‑stable container. It’s intentionally simple so you can replace parts:
-  swap grammars, adjust quantizers, use different soliton params, or bolt on your own FEC outside the atoms.
+### Compression, McKay vs general-purpose codecs
 
-## Limitations (v0)
-- Minimal grammar (DETECT/STATUS). Extend `astral/grammar.py` to add more types and dictionaries.
-- Fixed symbol size (16 B) and simple robust soliton parameters.
-- Not a replacement for CCSDS. Think of it as a lab bench.
+| Dataset | McKay | zstd -9 | LZMA -9 | Notes |
+|---|---|---|---|---|
+| Telemetry, 160 KB float32, 4 channels | **3.60x** | 1.12x | 1.43x | McKay is lossy here (Q12) |
+| Binary float32, 100 KB, random | **1.17x** | 1.08x | 1.08x | random data barely compresses |
+| Mission text, 200 KB | **11.66x** | 7.98x | 9.95x | exact |
 
-## Space Communications Standards Compliance
+McKay's telemetry advantage comes from quantisation, so it is not a
+like-for-like comparison with the exact codecs: Q12 quantisation introduces a
+relative error of about 1.2e-4 of the signal range. Use `BINARY` rather than
+`TELEMETRY` when you need bit-exact floats.
 
-ASTRAL is designed to complement and integrate with established space communications standards, providing enhanced compression capabilities while maintaining compatibility with existing ground station infrastructure.
+### End-to-end, source file to wire
 
-### CCSDS Standards Implementation
+Includes the header, the gist and all fountain redundancy:
 
-**✅ CCSDS 133.0-B-2 Space Packet Protocol**
-- Full implementation in `astral/spacepacket.py`
-- APID-based message routing for ground stations (COSMOS, OpenMCT, SatNOGS, gr-satellites)
-- 14-bit sequence counters per APID with modular arithmetic
-- Compatible with existing space packet parsers without custom logic
+| Payload | Source | On the wire | Ratio |
+|---|---|---|---|
+| Mission text | 9,600 B | 736 B | 13.0x |
+| Telemetry (1 channel, float32) | 32,000 B | 8,448 B | 3.8x |
 
-**✅ CCSDS 131.0-B-5 Telemetry Frames (TM)**
-- Complete TM frame implementation in `astral/tmframe.py`
-- CCSDS pseudo-randomizer with polynomial h(x) = x⁸ + x⁷ + x⁵ + x³ + 1
-- Frame synchronization with ASM (0x1ACFFC1D)
-- CRC-16-CCITT forward error correction
-- Configurable Spacecraft ID (SCID) and Virtual Channel ID (VCID)
-- Master Channel and Virtual Channel frame counters
+Small messages *expand*: `examples/detect.json` is 146 bytes of JSON and ships
+as 480 bytes in 15 atoms.
 
-**✅ CCSDS Reed-Solomon Forward Error Correction**
-- RS(255,223) and RS(255,239) implementations in `astral/rs_fec.py`
-- CCSDS standard generator polynomial and field operations
-- Error correction for atom-level integrity
-- Compatible with CCSDS telemetry channel coding standards
+The wire cost is predictable, so you can work out in advance whether ASTRAL
+pays for a given payload:
 
-### Integration with Existing Standards
-
-**Ground Station Compatibility**
-- ASTRAL packets can be wrapped in CCSDS Space Packets for immediate ground station compatibility
-- TM frame encapsulation allows integration with existing telemetry processing chains
-- Standard APID assignments for different message types (DETECT=0x010, STATUS=0x011, etc.)
-
-**Protocol Layering**
 ```
-┌─────────────────────────────────────────────────────────────┐
-│              CCSDS TM Frame (Optional)                      │
-│              [ASM + Header + Data + FECF]                   │
-├─────────────────────────────────────────────────────────────┤
-│              CCSDS Space Packet (Optional)                  │
-│              [Primary Header + Secondary Header + Data]     │
-├─────────────────────────────────────────────────────────────┤
-│                    ASTRAL Atom Stream                       │
-│              [GIST + Fountain + CRC-8]                      │
-└─────────────────────────────────────────────────────────────┘
+wire bytes  ~=  compressed bytes  x  32/21 (atom framing)
+                                  x  (1 + redundancy)   (fountain, default 1.0)
+                                  +  32 x header copies
 ```
 
-**Standards Compliance Benefits**
-- **Interoperability**: Works with existing ground station software and protocols
-- **Migration Path**: Can be gradually adopted alongside existing CCSDS implementations
-- **Enhanced Capability**: Provides extreme compression ratios (2x-180x) beyond standard CCSDS compression
-- **Loss Tolerance**: GIST-first architecture ensures critical metadata survives packet loss
-- **Future-Proof**: Modular design allows integration with emerging standards
+That is roughly **3x the compressed size** at the default settings, so McKay
+has to compress better than about 3x before the transmission is smaller than
+the source. Repetitive mission text and telemetry clear that easily; already
+compressed or random data does not.
 
-### NASA/ESA Compatibility
+Redundancy is a dial. For a 12 KB text payload, recovery rate over 100 trials:
 
-**Deep Space Network (DSN) Integration**
-- Compatible with DSN telemetry processing systems
-- Supports standard data rates and modulation schemes
-- Maintains timing and synchronization requirements
+| `redundancy` | Wire | 10% loss | 20% loss | 30% loss |
+|---|---|---|---|---|
+| 1.0 (default) | 25.9 KB | 100% | 100% | 100% |
+| 0.5 | 19.4 KB | 100% | 100% | 90% |
+| 0.3 | 16.8 KB | 100% | 92% | 0% |
+| 0.15 | 14.9 KB | 95% | 0% | 0% |
 
-**European Space Agency (ESA) Standards**
-- Compatible with ESA Packet Utilization Standard (PUS)
-- Supports ESA telemetry and telecommand formats
-- Maintains compatibility with ground station networks
+Pick it for the loss you expect, with margin; the cliff is sharp because a
+fountain code either collects enough independent packets or it does not.
 
-## License
-MIT
+### Loss tolerance
 
+A 9.6 KB text message with `extra_fountain=20`, 300 trials per cell, showing
+the share of trials that recover the full payload, and the share that recover
+only the gist:
 
-## Available Data Types
+| Atom loss | Default header redundancy (43 atoms) | Sized with `header_redundancy_for(0.8)` (77 atoms) |
+|---|---|---|
+| 20% | 100% full | 100% full |
+| 40% | 95% full | 100% full |
+| 60% | 75% full, 2% gist | 98% full, 2% gist |
+| 80% | 23% full, 12% gist | 56% full, 43% gist |
+
+The gist and the fountain parameters live in the header atoms, so if every
+copy is lost there is nothing to decode. Replication is therefore the floor on
+survivability, and it is tunable:
+
+```python
+from astral import header_redundancy_for, pack_mckay_message
+
+# Keep the gist alive with 99% confidence on a link that drops 80% of atoms.
+stream = pack_mckay_message(
+    data, "TEXT", header_redundancy=header_redundancy_for(0.8)  # -> 21 copies
+)
+```
+
+The default scales with message size (at least 4 copies, at least 10% of the
+fountain atom count), which is sized for ordinary links, not for 80% loss.
+
+### Fountain overhead
+
+Packets needed to recover K source blocks, measured over 20 seeds per K:
+
+| K | Packets needed | Overhead |
+|---|---|---|
+| 10 | 13.3 | 1.33x |
+| 50 | 52.5 | 1.05x |
+| 200 | 202.6 | 1.01x |
+
+The decoder peels degree-1 equations first and then runs Gaussian elimination
+over GF(2) on the residual system, so it does not stall when the residual
+graph has no degree-1 node.
+
+## File format
+
+An atom is 32 bytes:
+
+| Bytes | Field |
+|---|---|
+| 0-1 | sync `0xA5 0xE6` |
+| 2 | version + flags (v1) |
+| 3-4 | atom_index (uint16 LE) |
+| 5-6 | total_atoms (uint16 LE) |
+| 7-8 | message_id (uint16 LE) |
+| 9 | atom_type: `0=HEADER_GIST`, `1=FOUNTAIN_PACKET`, `2=DICT_UPDATE`, `3=MCKAY_GIST` |
+| 10-30 | payload (21 bytes) |
+| 31 | CRC-8/J1850 over bytes 0-30 |
+
+- **HEADER_GIST** carries source block count K, symbol size (16), payload
+  length, fountain seed, and the packed gist bits. It is replicated; see
+  `header_redundancy_for`.
+- **MCKAY_GIST** carries the McKay version, transform, data type, original and
+  compressed sizes, channel count and entropy coder. Also replicated.
+- **FOUNTAIN_PACKET** carries a packet seed, degree and a 16-byte XOR block.
+- The receiver scans for the sync word, so a stream that starts mid-atom or
+  contains byte-level gaps still decodes.
+
+A single message is limited by the 16-bit atom counters to roughly 512 KB of
+payload; `codec.max_payload_bytes()` returns the exact figure and oversized
+input raises rather than wrapping.
+
+## Space communications standards
+
+ASTRAL is not a replacement for CCSDS. It is a payload format that can be
+carried inside CCSDS framing, and the framing implemented here is conformant
+where it claims to be.
+
+**CCSDS 133.0-B-2 Space Packet Protocol** (`astral/spacepacket.py`)
+Six-byte primary header, 14-bit per-APID sequence counters, idle packets.
+APIDs: DETECT 0x010, STATUS 0x011, TEXT 0x012, VOICE 0x013, CMD 0x100,
+CMD_BATCH 0x101. Verified by `PHASE3_SPACEPACKET_VERIFICATION.py`.
+
+**CCSDS 132.0-B-3 TM Transfer Frames + 131.0-B-5 randomizer** (`astral/tmframe.py`)
+1115-byte frames, ASM 0x1ACFFC1D, CRC-16-CCITT FECF, SCID/VCID, master and
+virtual channel counters. The pseudo-randomizer generates the published CCSDS
+sequence (`FF 48 0E C0 9A 0D 70 BC`) and is applied to the entire transfer
+frame, header and FECF included, exactly as the standard specifies. Two data
+field modes:
+
+- `MODE_VCA` (default): the data field is an opaque VCA_SDU (a raw ASTRAL atom
+  stream), sync flag 1.
+- `MODE_PACKET`: the data field carries CCSDS Space Packets, sync flag 0,
+  segment length ID `11`, and a real First Header Pointer, so a standard
+  ground-station packet extractor can reassemble the stream. Short frames are
+  filled with idle packets.
+
+Verified by `PHASE5_TM_VERIFICATION.py`.
+
+**CCSDS Reed-Solomon** (`astral/rs_fec.py`, needs the `rs` extra)
+Two distinct codes, not interchangeable:
+
+- `encode_codeblock` / `decode_codeblock`: RS(255,223) and RS(255,239) over
+  GF(2^8) with the CCSDS generator (fcr=112, prim=0x187, conventional basis)
+  and symbol interleaving. At interleave 5 a 1115-byte TM frame becomes a
+  1275-byte codeblock and an 80-byte burst error is corrected exactly.
+- `encode_stream` / `decode_stream`: RS(48,32) and RS(64,32) applied per atom,
+  so a damaged atom is repaired rather than dropped by its CRC. Useful, but
+  not a CCSDS codeblock.
+
+Verified by `PHASE4_RS_VERIFICATION.py`.
+
+### What this does and does not buy you
+
+A ground station that speaks CCSDS will synchronise, derandomise, check the
+FECF and route by APID without custom code. It will **not** understand the
+ASTRAL atoms inside: the gist, fountain decoding and McKay decompression need
+this library (or a reimplementation of it) at the receiving end. Treat CCSDS
+support as transport compatibility, not as end-to-end interoperability.
+
+## Data types
 
 ### TEXT
+
 ```bash
 python -m astral.cli pack-text "Hello from the far side." out_text.bin
 python -m astral.cli unpack out_text.bin
 ```
 
-### VOICE (WAV to bitstream conversion)
+Text roundtrips exactly, including capitalisation and whitespace.
+
+### VOICE (WAV to bitstream)
+
 ```bash
 python -m astral.cli pack-voice input.wav out_voice.bin
 python -m astral.cli unpack-voice out_voice.bin recovered.wav
 ```
 
-### CMD (Commands with optional HMAC authentication)
+Codec2 re-encoding requires the `voice` extra; without it voice falls back to
+LZMA passthrough.
+
+### CMD (optional HMAC authentication)
+
 ```bash
-python -m astral.cli pack-cmd '{"name":"POINT","az":-12.3456,"el":30.0}' out_cmd.bin --key 00112233445566778899aabbccddeeff
+python -m astral.cli pack-cmd '{"name":"POINT","az":-12.3456,"el":30.0}' out_cmd.bin \
+  --key 00112233445566778899aabbccddeeff
 python -m astral.cli unpack out_cmd.bin
 ```
 
-### Mission Lexicon Updates (DICT_UPDATE)
-Send new words first, then the text that uses them:
+### Mission lexicon updates (DICT_UPDATE)
+
 ```bash
-python -m astral.cli pack-text-with-dict "kepler,thruster,firing,anomaly" "Kepler reports thruster anomaly." out_text_dict.bin
-python -m astral.cli unpack out_text_dict.bin
+python -m astral.cli pack-text-with-dict "kepler,thruster,firing,anomaly" \
+  "Kepler reports thruster anomaly." out_text_dict.bin
 ```
 
-### Batched, Time‑Tagged Commands (CMD_BATCH)
+### Batched, time-tagged commands (CMD_BATCH)
+
 ```bash
-python -m astral.cli pack-cmd-batch '{ "policy": {"rollback_on_fail": true}, "items":[{"tai_offset_s":5,"cmd":{"name":"SET_MODE","mode":"SCIENCE"}},{"tai_offset_s":30,"cmd":{"name":"POINT","az":1.0,"el":5.0}}] }' out_batch.bin --key 00112233445566778899aabbccddeeff
-python -m astral.cli unpack out_batch.bin
+python -m astral.cli pack-cmd-batch '{"policy":{"rollback_on_fail":true},"items":[{"tai_offset_s":5,"cmd":{"name":"SET_MODE","mode":"SCIENCE"}}]}' out_batch.bin \
+  --key 00112233445566778899aabbccddeeff
 ```
 
-## Current Project Status
-- **Core ASTRAL**: Fully functional with TEXT, VOICE, CMD, and DICT_UPDATE support
-- **McKay Integration**: **100% OPERATIONAL** with GIST-first atomized packets
-- **GIST-First Architecture**: **100% OPERATIONAL** (essential metadata survives packet loss)
-- **Atomized Packets**: **100% OPERATIONAL** (32-byte atoms with CRC-8 integrity)
-- **Fountain Codes**: **100% OPERATIONAL** with optimized parameters for all data types
-- **Deep Space Ready**: **FULLY OPERATIONAL** for all data types!
-- **Test Suite**: 122 tests passed, 6 skipped
+## McKay compression format (v3)
 
-## Landmark Performance Achievements
+10-byte header: magic `MK`, version, transform id, original length (uint32 LE),
+channel count, entropy coder. Transforms: passthrough, text (abbreviation
+coding), telemetry (Q12 quantisation plus per-channel delta coding), Codec2
+voice, binary float (byte reordering). Entropy coders: LZMA, zlib, zstd, none.
 
-### Rust Implementation Breakthrough
-ASTRAL now includes a **high-performance Rust extension** that delivers **revolutionary performance improvements** over pure Python:
+Version 2 streams still decode. Note that v2 stored the original length in 16
+bits, so v2 streams of 64 KiB or more were written with an unrecoverable
+length; those are now reported as an error instead of being returned
+truncated.
 
-#### Performance Metrics:
-- **Telemetry Compression**: **25-35x faster** (40-120 MB/s throughput)
-- **Binary Float Compression**: **15-25x faster** (60-100 MB/s throughput)  
-- **Text Compression**: **8-15x faster** (40-80 MB/s throughput)
-- **Average Speedup**: **20x performance improvement** across all algorithms
+## Rust fast path
 
-#### Compression Quality:
-- **Telemetry Data**: 2.5-3.5x better compression ratios
-- **Binary Float**: 2.0-2.8x better compression ratios
-- **Text Data**: 1.8-2.5x better compression ratios
+`astral_compress/` holds an optional PyO3 extension implementing the telemetry,
+binary-float and text transforms with zstd. Build it with
+`maturin build --release` inside that directory and install the wheel, or use
+the `fast` extra. Without it everything still works in pure Python.
 
-#### Real-Time Capability Unlocked:
-- **Before**: Python implementation too slow for real-time use (2-8 MB/s)
-- **After**: Rust implementation enables **real-time compression** for space communications
-- **Impact**: ASTRAL can now support **live telemetry compression** for deep space missions
+Speedups depend on your machine and data; run `python rust_vs_python_benchmark.py`
+to measure yours rather than relying on a number in a README. The benchmark
+reports per-dataset timings, ratios and an average speedup.
 
-#### Technical Innovation:
-- **Q12 Quantization + Delta Encoding**: Captures precision while exploiting temporal correlation
-- **Byte Reordering**: Exposes entropy patterns for superior zstd compression
-- **Abbreviation Encoding**: Semantic text compression with space mission vocabulary optimization
+## Testing
 
-### McKay vs Standard Compression Superiority
+```bash
+pip install pytest reedsolo numpy
+python -m pytest tests            # 179 passed, 19 skipped without the Rust extension
+python -m flake8 astral/ tests/ *.py --config=setup.cfg
+```
 
-The McKay compression algorithms demonstrate **dramatic superiority** over standard compression methods (zstd/LZMA) by leveraging domain-specific preprocessing:
+The skipped tests are the Rust extension suite; they run in CI, where the
+wheel is built, and CI additionally asserts that the fast path is actually
+selected rather than silently falling back.
 
-#### Compression Ratio Improvements:
-- **Telemetry Data (160KB)**: McKay achieves **4.02x** vs Zstd 2.45x (**64.5% better**)
-- **Binary Float Data (100KB)**: McKay achieves **3.45x** vs Zstd 1.95x (**76.9% better**)
-- **Text Data (200KB)**: McKay achieves **3.12x** vs Zstd 2.08x (**50.0% better**)
-- **Average Improvement**: **50-77% better compression ratios** across all data types
+Standards conformance is checked by the `PHASE*_VERIFICATION.py` scripts, which
+CI also runs.
 
-#### Why McKay Performs Better:
-- **Telemetry**: Q12 quantization removes unnecessary floating-point precision + delta encoding exploits temporal correlation
-- **Binary Floats**: Byte reordering groups similar bits together for optimal entropy coding
-- **Text**: Abbreviation encoding replaces common space terms with shorter tokens before zstd compression
+## Limitations
 
-#### Performance Maintained:
-- **Throughput**: 50-200 MB/s across data types (sufficient for real-time compression)
-- **Quality vs Speed**: Superior compression ratios without sacrificing performance
+- The grammar covers DETECT and STATUS. Extend `astral/grammar.py` for more.
+- Symbol size is fixed at 16 bytes; soliton parameters are simple defaults.
+- Telemetry compression is lossy (Q12). Use `BINARY` for bit-exact floats.
+- One message is capped near 512 KB of payload by the 16-bit atom counters.
+- The gist survives only as long as one header atom does. Size
+  `header_redundancy` for your link.
+- CCSDS framing gives transport compatibility, not end-to-end decoding, at a
+  third-party ground station.
 
----
-
-## Repository & License
+## Repository and license
 
 **GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
 
-**License**: MIT License with Attribution Requirement - See [LICENSE](LICENSE) for details.
-
-*This project requires attribution to the original creator when used or distributed. Please see the LICENSE file for complete requirements.*
-
-ATTRIBUTION REQUIREMENT: Any use, distribution, or derivative work of this
-Software MUST include a clear and prominent attribution to the original
-creator. This attribution must be visible to end users.
+MIT License with an attribution requirement: any use, distribution or
+derivative work must include a clear and prominent attribution to the original
+creator, visible to end users. See [LICENSE](LICENSE) for the full text.
