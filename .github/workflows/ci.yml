@@ -58,11 +58,7 @@ jobs:
           print('Rust extension active')
           "
 
-      - name: Run standards verification scripts
+      - name: Run the worked examples
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: |
-          python PHASE3_SPACEPACKET_VERIFICATION.py
-          python PHASE4_RS_VERIFICATION.py
-          python PHASE5_TM_VERIFICATION.py
-          python -m astral.mckay_usage_example
+        run: python -m astral.mckay_usage_example

@@ -83,7 +83,14 @@ def cmd_pack(args):
 def cmd_unpack(args):
     try:
         stream = read_bin(args.input)
-        result = unpack_stream(stream)
+        key = bytes.fromhex(args.key) if getattr(args, "key", None) else None
+        result = unpack_stream(stream, key=key)
+        if result.get("command_authenticated") is False and key is None:
+            print(
+                "WARNING: this is a command and no --key was given, so it is "
+                "NOT authenticated. Do not act on it.",
+                file=sys.stderr,
+            )
         print_json(result)
     except Exception as e:
         print(f"Error unpacking stream: {e}")
@@ -186,7 +193,9 @@ def cmd_pack_cmd(args):
     try:
         cmd = json.loads(args.json)
         key = bytes.fromhex(args.key) if args.key else None
-        blob = pack_cmd_message(cmd, extra_fountain=args.extra, key=key)
+        blob = pack_cmd_message(
+            cmd, extra_fountain=args.extra, key=key, counter=args.counter
+        )
         write_bin(args.output, blob)
         print(
             f"Wrote {len(blob)} bytes to {args.output} "
@@ -202,7 +211,9 @@ def cmd_pack_cmd_batch(args):
     try:
         batch = json.loads(args.json)
         key = bytes.fromhex(args.key) if args.key else None
-        blob = pack_cmd_batch(batch, extra_fountain=args.extra, key=key)
+        blob = pack_cmd_batch(
+            batch, extra_fountain=args.extra, key=key, counter=args.counter
+        )
         write_bin(args.output, blob)
         print(
             f"Wrote {len(blob)} bytes to {args.output} "
@@ -412,6 +423,11 @@ def main(argv=None):
         "unpack", help="unpack atomized binary to JSON (best-effort)"
     )
     p_unpack.add_argument("input")
+    p_unpack.add_argument(
+        "--key",
+        default=None,
+        help="hex HMAC key; required to authenticate a CMD or CMD_BATCH",
+    )
     p_unpack.set_defaults(func=cmd_unpack)
 
     p_sim = sub.add_parser("simulate", help="simulate random atom loss")
@@ -620,6 +636,12 @@ def main(argv=None):
     p_pack_cmd.add_argument("output")
     p_pack_cmd.add_argument("--extra", type=int, default=0)
     p_pack_cmd.add_argument("--key", help="hex key for HMAC auth", default=None)
+    p_pack_cmd.add_argument(
+        "--counter",
+        type=int,
+        default=0,
+        help="anti-replay counter; must increase on every command sent",
+    )
     p_pack_cmd.set_defaults(func=cmd_pack_cmd)
 
     p_pack_cmd_batch = sub.add_parser(
@@ -630,6 +652,12 @@ def main(argv=None):
     p_pack_cmd_batch.add_argument("--extra", type=int, default=0)
     p_pack_cmd_batch.add_argument(
         "--key", help="hex key for HMAC over batch", default=None
+    )
+    p_pack_cmd_batch.add_argument(
+        "--counter",
+        type=int,
+        default=0,
+        help="anti-replay counter; must increase on every batch sent",
     )
     p_pack_cmd_batch.set_defaults(func=cmd_pack_cmd_batch)
 

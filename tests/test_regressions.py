@@ -821,3 +821,128 @@ class TestHeaderBoundIntegrity:
         result = codec.unpack_stream(headers_only)
         assert result["complete"] is False
         assert result["integrity_ok"] is None
+
+
+class TestCommandAuthentication:
+    """
+    The HMAC used to be decorative. `unpack_stream` never verified, an
+    unsigned command decoded identically to a signed one apart from a flag,
+    decoding without a key omitted the flag entirely (so `.get("auth_ok",
+    True)` failed open), and replay was unrestricted.
+    """
+
+    KEY = bytes.fromhex("00112233445566778899aabbccddeeff")
+    BURN = {"name": "BURN", "thruster_id": 1, "duration_ms": 12500}
+
+    def test_decoding_without_a_key_raises(self):
+        from astral.commands import CommandAuthError, decode_cmd, encode_cmd
+
+        with pytest.raises(CommandAuthError):
+            decode_cmd(encode_cmd(self.BURN, key=self.KEY))
+
+    def test_stripped_hmac_is_refused(self):
+        """The downgrade attack: remove the trailer and hope nobody checks."""
+        from astral.commands import CommandAuthError, decode_cmd, encode_cmd
+
+        with pytest.raises(CommandAuthError):
+            decode_cmd(encode_cmd(self.BURN), key=self.KEY)
+
+    def test_wrong_key_is_refused(self):
+        from astral.commands import CommandAuthError, decode_cmd, encode_cmd
+
+        signed = encode_cmd(self.BURN, key=self.KEY)
+        with pytest.raises(CommandAuthError):
+            decode_cmd(signed, key=b"x" * 16)
+
+    def test_unverified_results_always_say_so(self):
+        from astral.commands import decode_cmd, encode_cmd
+
+        for blob in (encode_cmd(self.BURN), encode_cmd(self.BURN, key=self.KEY)):
+            out = decode_cmd(blob, require_auth=False)
+            assert out["authenticated"] is False
+            assert out["auth_ok"] is False
+
+    def test_replay_is_rejected(self):
+        from astral.commands import (
+            CommandAuthError,
+            CommandSequencer,
+            ReplayGuard,
+            decode_cmd,
+            encode_cmd,
+        )
+
+        seq = CommandSequencer()
+        guard = ReplayGuard()
+        first = encode_cmd(self.BURN, key=self.KEY, counter=seq.next())
+        second = encode_cmd(self.BURN, key=self.KEY, counter=seq.next())
+
+        assert decode_cmd(first, key=self.KEY, replay_guard=guard)["fresh"] is True
+        assert decode_cmd(second, key=self.KEY, replay_guard=guard)["fresh"] is True
+        with pytest.raises(CommandAuthError, match="replayed"):
+            decode_cmd(first, key=self.KEY, replay_guard=guard)
+        with pytest.raises(CommandAuthError, match="replayed"):
+            decode_cmd(second, key=self.KEY, replay_guard=guard)
+
+    def test_guard_does_not_advance_on_a_rejected_command(self):
+        from astral.commands import ReplayGuard, decode_cmd, encode_cmd
+
+        guard = ReplayGuard()
+        decode_cmd(
+            encode_cmd(self.BURN, key=self.KEY, counter=5),
+            key=self.KEY,
+            replay_guard=guard,
+        )
+        assert guard.last_accepted == 5
+        with pytest.raises(Exception):
+            decode_cmd(
+                encode_cmd(self.BURN, key=b"y" * 16, counter=9),
+                key=self.KEY,
+                replay_guard=guard,
+            )
+        assert guard.last_accepted == 5  # a bad MAC must not move the window
+
+    def test_unpack_stream_verifies_commands(self):
+        from astral.commands import ReplayGuard
+
+        stream = codec.pack_cmd_message(self.BURN, key=self.KEY, counter=3)
+        guard = ReplayGuard()
+        good = codec.unpack_stream(stream, key=self.KEY, replay_guard=guard)
+        assert good["command_authenticated"] is True
+        assert good["message"]["cmd"]["duration_ms"] == 12500
+
+        replayed = codec.unpack_stream(stream, key=self.KEY, replay_guard=guard)
+        assert replayed["command_authenticated"] is False
+        assert replayed["message"] is None
+        assert "authentication failed" in replayed["error"]
+
+    def test_unpack_stream_marks_unverified_commands(self):
+        stream = codec.pack_cmd_message(self.BURN, key=self.KEY, counter=1)
+        result = codec.unpack_stream(stream)  # no key
+        assert result["command_authenticated"] is False
+        assert result["message"]["cmd"]["authenticated"] is False
+
+    def test_non_command_messages_report_none(self):
+        result = codec.unpack_stream(codec.pack_text_message("hello"))
+        assert result["command_authenticated"] is None
+
+    def test_tampered_command_body_is_refused(self):
+        from astral.commands import CommandAuthError, decode_cmd, encode_cmd
+
+        blob = bytearray(encode_cmd(self.BURN, key=self.KEY, counter=1))
+        blob[4] ^= 0x01  # change the burn duration
+        with pytest.raises(CommandAuthError):
+            decode_cmd(bytes(blob), key=self.KEY)
+
+    def test_batch_authentication(self):
+        from astral.commands import CommandAuthError, decode_cmd_batch, encode_cmd_batch
+
+        batch = {
+            "policy": {"rollback_on_fail": True},
+            "items": [{"tai_offset_s": 5, "cmd": self.BURN}],
+        }
+        signed = encode_cmd_batch(batch, key=self.KEY, counter=2)
+        out = decode_cmd_batch(signed, key=self.KEY)
+        assert out["authenticated"] is True
+        assert out["items"][0]["cmd"]["duration_ms"] == 12500
+        with pytest.raises(CommandAuthError):
+            decode_cmd_batch(encode_cmd_batch(batch), key=self.KEY)

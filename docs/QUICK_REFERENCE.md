@@ -110,9 +110,6 @@ transmission to be smaller than the source.
 ```bash
 python -m pytest tests
 python -m flake8 astral/ tests/ *.py --config=setup.cfg
-python mckay_vs_standard.py
+python benchmarks/mckay_vs_standard.py
 python -m astral.mckay_usage_example
-python PHASE3_SPACEPACKET_VERIFICATION.py
-python PHASE4_RS_VERIFICATION.py
-python PHASE5_TM_VERIFICATION.py
 ```

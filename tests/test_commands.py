@@ -4,18 +4,24 @@ from __future__ import annotations
 
 import pytest
 
-from astral.commands import decode_cmd, decode_cmd_batch, encode_cmd, encode_cmd_batch
+from astral.commands import (
+    CommandAuthError,
+    decode_cmd,
+    decode_cmd_batch,
+    encode_cmd,
+    encode_cmd_batch,
+)
 
 KEY = b"mission-secret-key-32bytes-pad!!"
 
 
 class TestEncodeDecodeCmd:
     def test_reboot_roundtrip(self):
-        assert decode_cmd(encode_cmd({"name": "REBOOT"}))["name"] == "REBOOT"
+        assert decode_cmd(encode_cmd({"name": "REBOOT"}), require_auth=False)["name"] == "REBOOT"
 
     def test_point_roundtrip(self):
         cmd = {"name": "POINT", "az": -12.3456, "el": 30.0}
-        dec = decode_cmd(encode_cmd(cmd))
+        dec = decode_cmd(encode_cmd(cmd), require_auth=False)
         assert dec["name"] == "POINT"
         assert abs(dec["az"] - -12.3456) < 0.001
         assert abs(dec["el"] - 30.0) < 0.001
@@ -23,7 +29,10 @@ class TestEncodeDecodeCmd:
     def test_set_mode_roundtrip(self):
         for mode in ("SAFE", "NORMAL", "SCIENCE"):
             assert (
-                decode_cmd(encode_cmd({"name": "SET_MODE", "mode": mode}))["mode"]
+                decode_cmd(
+                    encode_cmd({"name": "SET_MODE", "mode": mode}),
+                    require_auth=False,
+                )["mode"]
                 == mode
             )
 
@@ -52,13 +61,20 @@ class TestAntiReplay:
 
     def test_wrong_key_fails_hmac(self):
         enc = encode_cmd({"name": "REBOOT"}, key=KEY, counter=0)
-        dec = decode_cmd(enc, key=b"wrong-key-32bytes-padding!!!!!!", counter=0)
+        dec = decode_cmd(
+            enc,
+            key=b"wrong-key-32bytes-padding!!!!!!",
+            counter=0,
+            require_auth=False,
+        )
         assert dec["auth_ok"] is False
 
     def test_tampered_counter_fails_hmac(self):
         enc = bytearray(encode_cmd({"name": "REBOOT"}, key=KEY, counter=5))
         enc[-36] ^= 0x01
-        assert decode_cmd(bytes(enc), key=KEY)["auth_ok"] is False
+        assert (
+            decode_cmd(bytes(enc), key=KEY, require_auth=False)["auth_ok"] is False
+        )
 
     def test_trailer_is_36_bytes(self):
         plain = len(encode_cmd({"name": "REBOOT"}))
@@ -89,7 +105,15 @@ class TestAntiReplay:
 
 
 class TestUnauthenticated:
-    def test_no_auth_fields_without_key(self):
-        dec = decode_cmd(encode_cmd({"name": "REBOOT"}))
-        assert "auth_ok" not in dec
-        assert "counter" not in dec
+    def test_decoding_without_a_key_is_refused(self):
+        """
+        Previously this returned the command with no auth fields at all, so a
+        caller doing `result.get("auth_ok", True)` failed open.
+        """
+        with pytest.raises(CommandAuthError):
+            decode_cmd(encode_cmd({"name": "REBOOT"}))
+
+    def test_explicit_inspection_is_marked_unauthenticated(self):
+        dec = decode_cmd(encode_cmd({"name": "REBOOT"}), require_auth=False)
+        assert dec["authenticated"] is False
+        assert dec["auth_ok"] is False

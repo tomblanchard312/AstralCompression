@@ -4,11 +4,21 @@ Reed-Solomon forward error correction.
 Two distinct things live here, and they are not interchangeable:
 
 CCSDS channel coding (``encode_codeblock`` / ``decode_codeblock``)
-    RS(255,223) and RS(255,239) over GF(2^8) with the CCSDS 131.0-B-5
-    generator (fcr=112, primitive polynomial 0x187, conventional basis) and
-    symbol interleaving. This is the code a standard ground station applies to
-    TM Transfer Frames: interleave depth 5 over a 1115-byte frame yields the
-    usual 1275-byte codeblock.
+    RS(255,223) and RS(255,239) over GF(2^8) with the CCSDS 131.0-B generator:
+    field polynomial 0x187, first consecutive root 112, and primitive element
+    alpha^11, so the generator polynomial roots are alpha^(11*(112+i)). These
+    match Phil Karn's libfec (FCR=112, PRIM=11), which is what gr-satellites
+    and most ground stations use, and were verified against an independent
+    construction of the generator polynomial.
+
+    Symbols are carried in the **dual basis** by default, as the standard
+    specifies, using Berlekamp's transform; pass ``basis="conventional"`` for
+    the libfec ``encode_rs_8`` representation instead. Getting this wrong is
+    the classic CCSDS RS interop failure: the maths is identical but the byte
+    values on the wire are not.
+
+    Interleave depth 5 over a 1115-byte frame yields the usual 1275-byte
+    codeblock.
 
 ASTRAL atom protection (``encode_stream`` / ``decode_stream``)
     A shorter RS code applied per 32-byte atom, so that a corrupted atom can be
@@ -43,7 +53,52 @@ CCSDS_N = 255
 CCSDS_K = {223: 32, 239: 16}  # message length -> parity symbols
 CCSDS_DEFAULT_INTERLEAVE = 5
 
-_RS_PARAMS = dict(fcr=112, prim=0x187, generator=2, c_exp=8)
+# CCSDS 131.0-B: field polynomial 0x187, FCR 112, primitive element alpha^11.
+# reedsolo takes the primitive element itself, so pass alpha^11 = 173 rather
+# than alpha = 2. With generator=2 the roots are alpha^112..alpha^143, which is
+# a valid RS code but NOT the CCSDS one and will not decode at a ground station.
+CCSDS_FIELD_POLY = 0x187
+CCSDS_FCR = 112
+CCSDS_PRIM_EXP = 11
+CCSDS_GENERATOR = 173  # alpha^11 in GF(2^8) mod 0x187
+
+_RS_PARAMS = dict(
+    fcr=CCSDS_FCR, prim=CCSDS_FIELD_POLY, generator=CCSDS_GENERATOR, c_exp=8
+)
+
+BASIS_DUAL = "dual"
+BASIS_CONVENTIONAL = "conventional"
+
+# Berlekamp dual-basis transform (CCSDS 131.0-B Annex; seed from Phil Karn's
+# gen_ccsds_tal.c). Taltab maps conventional -> dual, Tal1tab is its inverse.
+_TAL = (0x8D, 0xEF, 0xEC, 0x86, 0xFA, 0x99, 0xAF, 0x7B)
+
+
+def _build_tal_tables():
+    taltab = [0] * 256
+    tal1tab = [0] * 256
+    for i in range(256):
+        acc = 0
+        for k in range(8):
+            if i & (1 << k):
+                acc ^= _TAL[7 - k]
+        taltab[i] = acc
+        tal1tab[acc] = i
+    return bytes(taltab), bytes(tal1tab)
+
+
+_TALTAB, _TAL1TAB = _build_tal_tables()
+
+
+def to_dual_basis(data: bytes) -> bytes:
+    """Conventional representation -> dual basis (CCSDS wire order)."""
+    return bytes(_TALTAB[b] for b in data)
+
+
+def from_dual_basis(data: bytes) -> bytes:
+    """Dual basis (CCSDS wire order) -> conventional representation."""
+    return bytes(_TAL1TAB[b] for b in data)
+
 
 _RS_E16 = reedsolo.RSCodec(nsym=32, **_RS_PARAMS)
 _RS_E8 = reedsolo.RSCodec(nsym=16, **_RS_PARAMS)
@@ -118,11 +173,15 @@ def codeword_size(e: int = 16) -> int:
     return CODEWORD_SIZE[e]
 
 
-def _check_ccsds_params(k: int, interleave: int) -> None:
+def _check_ccsds_params(k: int, interleave: int, basis: str = BASIS_DUAL) -> None:
     if k not in CCSDS_K:
         raise ValueError(f"k must be one of {sorted(CCSDS_K)}, got {k}")
     if not isinstance(interleave, int) or interleave < 1 or interleave > 8:
         raise ValueError("interleave depth must be 1..8 (CCSDS allows 1,2,3,4,5,8)")
+    if basis not in (BASIS_DUAL, BASIS_CONVENTIONAL):
+        raise ValueError(
+            f"basis must be {BASIS_DUAL!r} or {BASIS_CONVENTIONAL!r}, got {basis!r}"
+        )
 
 
 def codeblock_sizes(k: int = 223, interleave: int = CCSDS_DEFAULT_INTERLEAVE):
@@ -132,17 +191,24 @@ def codeblock_sizes(k: int = 223, interleave: int = CCSDS_DEFAULT_INTERLEAVE):
 
 
 def encode_codeblock(
-    data: bytes, k: int = 223, interleave: int = CCSDS_DEFAULT_INTERLEAVE
+    data: bytes,
+    k: int = 223,
+    interleave: int = CCSDS_DEFAULT_INTERLEAVE,
+    basis: str = BASIS_DUAL,
 ) -> bytes:
     """
     Encode one CCSDS RS codeblock.
 
-    ``data`` must be exactly ``k * interleave`` bytes. Symbols are interleaved
-    to depth ``interleave``, matching CCSDS 131.0-B-5: the j-th codeword takes
-    every ``interleave``-th byte starting at j, and the resulting codewords are
-    re-interleaved on output so that a burst error is spread across codewords.
+    ``data`` must be exactly ``k * interleave`` bytes, in the representation
+    named by ``basis``. Symbols are interleaved to depth ``interleave``: the
+    j-th codeword takes every ``interleave``-th byte starting at j, and the
+    codewords are re-interleaved on output so a burst is spread across them.
+
+    In the default dual basis this mirrors libfec's ``encode_rs_ccsds``: the
+    data is mapped to the conventional representation, encoded, and the parity
+    mapped back, leaving the data bytes untouched on the wire.
     """
-    _check_ccsds_params(k, interleave)
+    _check_ccsds_params(k, interleave, basis)
     data_size, block_size = codeblock_sizes(k, interleave)
     if len(data) != data_size:
         raise ValueError(
@@ -151,10 +217,16 @@ def encode_codeblock(
         )
 
     codec = _RS_CCSDS[k]
+    n_parity = CCSDS_K[k]
     codewords = []
     for j in range(interleave):
         message = data[j::interleave]
-        codewords.append(bytes(codec.encode(message)))
+        if basis == BASIS_DUAL:
+            conventional = from_dual_basis(message)
+            parity = bytes(codec.encode(conventional))[-n_parity:]
+            codewords.append(message + to_dual_basis(parity))
+        else:
+            codewords.append(bytes(codec.encode(message)))
 
     out = bytearray(block_size)
     for j, cw in enumerate(codewords):
@@ -163,7 +235,10 @@ def encode_codeblock(
 
 
 def decode_codeblock(
-    block: bytes, k: int = 223, interleave: int = CCSDS_DEFAULT_INTERLEAVE
+    block: bytes,
+    k: int = 223,
+    interleave: int = CCSDS_DEFAULT_INTERLEAVE,
+    basis: str = BASIS_DUAL,
 ) -> tuple[bytes, int, bool]:
     """
     Decode one CCSDS RS codeblock.
@@ -173,7 +248,7 @@ def decode_codeblock(
     is its received (still corrupt) message part, so callers can decide whether
     to use it or drop the block.
     """
-    _check_ccsds_params(k, interleave)
+    _check_ccsds_params(k, interleave, basis)
     _data_size, block_size = codeblock_sizes(k, interleave)
     if len(block) != block_size:
         raise ValueError(
@@ -186,13 +261,21 @@ def decode_codeblock(
     ok = True
     for j in range(interleave):
         cw = block[j::interleave]
+        if basis == BASIS_DUAL:
+            cw = from_dual_basis(cw)
         try:
             msg, _, errata = codec.decode(cw)
-            messages.append(bytes(msg))
+            msg = bytes(msg)
+            if basis == BASIS_DUAL:
+                msg = to_dual_basis(msg)
+            messages.append(msg)
             n_corrected += len(errata) if errata else 0
         except reedsolo.ReedSolomonError:
             ok = False
-            messages.append(bytes(cw[:k]))
+            recovered = bytes(cw[:k])
+            if basis == BASIS_DUAL:
+                recovered = to_dual_basis(recovered)
+            messages.append(recovered)
 
     out = bytearray(k * interleave)
     for j, msg in enumerate(messages):
@@ -201,7 +284,10 @@ def decode_codeblock(
 
 
 def encode_codeblocks(
-    data: bytes, k: int = 223, interleave: int = CCSDS_DEFAULT_INTERLEAVE
+    data: bytes,
+    k: int = 223,
+    interleave: int = CCSDS_DEFAULT_INTERLEAVE,
+    basis: str = BASIS_DUAL,
 ) -> bytes:
     """
     Encode a byte stream as a sequence of CCSDS RS codeblocks.
@@ -215,7 +301,7 @@ def encode_codeblocks(
         chunk = data[i : i + data_size]
         if len(chunk) < data_size:
             chunk = chunk + bytes(data_size - len(chunk))
-        out += encode_codeblock(chunk, k, interleave)
+        out += encode_codeblock(chunk, k, interleave, basis)
     return bytes(out)
 
 
@@ -224,6 +310,7 @@ def decode_codeblocks(
     k: int = 223,
     interleave: int = CCSDS_DEFAULT_INTERLEAVE,
     original_length: int | None = None,
+    basis: str = BASIS_DUAL,
 ) -> tuple[bytes, dict]:
     """
     Decode a sequence of CCSDS RS codeblocks.
@@ -238,7 +325,9 @@ def decode_codeblocks(
     n_uncorrectable = 0
 
     for i in range(0, len(stream) - block_size + 1, block_size):
-        data, corrected, ok = decode_codeblock(stream[i : i + block_size], k, interleave)
+        data, corrected, ok = decode_codeblock(
+            stream[i : i + block_size], k, interleave, basis
+        )
         out += data
         n_blocks += 1
         n_corrected += corrected

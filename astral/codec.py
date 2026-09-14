@@ -10,6 +10,7 @@ from .grammar import make_gist_bits, encode_payload, decode_payload
 from .grammar import parse_gist
 from .textpack import encode_text, decode_text
 from .commands import (
+    CommandAuthError,
     encode_cmd,
     decode_cmd,
     encode_cmd_batch,
@@ -113,6 +114,16 @@ def _check_payload_size(
             f"bytes (max {limit} at this redundancy). Split it across "
             f"messages."
         )
+
+
+def _command_auth_state(message):
+    """True/False for CMD messages, None when the message is not a command."""
+    if not isinstance(message, dict):
+        return None
+    body = message.get("cmd") or message.get("batch")
+    if not isinstance(body, dict):
+        return None
+    return bool(body.get("authenticated"))
 
 
 def _majority(candidates):
@@ -312,8 +323,9 @@ def pack_cmd_message(
     min_redundancy: int = 10,
     header_redundancy: int | None = None,
     redundancy: float = 1.0,
+    counter: int = 0,
 ) -> bytes:
-    payload = encode_cmd(cmd, key=key)
+    payload = encode_cmd(cmd, key=key, counter=counter)
     msg = {"type": "CMD", "conf": 0.99}
     return _pack_with_custom_payload(
         msg,
@@ -355,8 +367,9 @@ def pack_cmd_batch(
     min_redundancy: int = 10,
     header_redundancy: int | None = None,
     redundancy: float = 1.0,
+    counter: int = 0,
 ) -> bytes:
-    payload = encode_cmd_batch(batch, key=key)
+    payload = encode_cmd_batch(batch, key=key, counter=counter)
     msg = {"type": "CMD_BATCH", "conf": 0.99}
     return _pack_with_custom_payload(
         msg,
@@ -567,7 +580,16 @@ def unpack_mckay_stream(stream: bytes) -> dict:
     return result
 
 
-def unpack_stream(stream: bytes):
+def unpack_stream(stream: bytes, key: bytes | None = None, replay_guard=None):
+    """
+    Decode an ASTRAL stream.
+
+    ``key`` and ``replay_guard`` apply to CMD and CMD_BATCH messages. With a
+    key, a command that fails authentication or freshness is reported as an
+    error instead of being returned. Without one, commands are still decoded
+    for inspection but are tagged ``authenticated: False``: never act on such
+    a command.
+    """
     # Input validation
     if not isinstance(stream, bytes):
         raise ValueError("stream must be bytes")
@@ -696,12 +718,45 @@ def unpack_stream(stream: bytes):
                 elif mtype == "VOICE":
                     message = {"type": "VOICE", "bytes": payload}
                 elif mtype == "CMD":
-                    message = {"type": "CMD", "cmd": decode_cmd(payload)}
+                    message = {
+                        "type": "CMD",
+                        "cmd": decode_cmd(
+                            payload,
+                            key=key,
+                            require_auth=key is not None,
+                            replay_guard=replay_guard,
+                        ),
+                    }
                 elif mtype == "CMD_BATCH":
-                    message = {"type": "CMD_BATCH", "batch": decode_cmd_batch(payload)}
+                    message = {
+                        "type": "CMD_BATCH",
+                        "batch": decode_cmd_batch(
+                            payload,
+                            key=key,
+                            require_auth=key is not None,
+                            replay_guard=replay_guard,
+                        ),
+                    }
                 else:
                     message = decode_payload(payload)
                 complete = True
+            except CommandAuthError as exc:
+                # A command that cannot be authenticated must not look like a
+                # decode that merely failed for lack of atoms.
+                return {
+                    "message_id": msg_id,
+                    "total_atoms": total_atoms,
+                    "received_atoms": len(atoms),
+                    "gist": gist,
+                    "mckay": mckay_gist,
+                    "complete": False,
+                    "recovered_fraction": recovered_fraction,
+                    "message": None,
+                    "data": None,
+                    "integrity_ok": integrity,
+                    "command_authenticated": False,
+                    "error": f"command authentication failed: {exc}",
+                }
             except Exception:
                 complete = False
                 message = None
@@ -717,6 +772,7 @@ def unpack_stream(stream: bytes):
         "message": message,
         "data": decompressed,
         "integrity_ok": integrity,
+        "command_authenticated": _command_auth_state(message),
     }
 
 
