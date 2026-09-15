@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import random
 import struct
 import warnings
@@ -16,19 +17,19 @@ import zlib
 
 import pytest
 
-from astral import codec, container, tmframe
+from gistlink import codec, container, tmframe
 
 try:
-    from astral import rs_fec
+    from gistlink import rs_fec
 
     RS_AVAILABLE = True
-except ImportError:  # optional extra: pip install astral-compression[rs]
+except ImportError:  # optional extra: pip install gistlink[rs]
     rs_fec = None
     RS_AVAILABLE = False
-from astral import mckay_astral_integration as mckay
-from astral.fountain import lt_decode_blocks, lt_encode_blocks
-from astral.spacepacket import SpacePacketSequenceCounter, unwrap, wrap
-from astral.textpack import decode_text, encode_text
+from gistlink import compress as compress
+from gistlink.fountain import lt_decode_blocks, lt_encode_blocks
+from gistlink.spacepacket import SpacePacketSequenceCounter, unwrap, wrap
+from gistlink.textpack import decode_text, encode_text
 
 
 def _telemetry(n: int, channels: int = 1) -> bytes:
@@ -37,92 +38,92 @@ def _telemetry(n: int, channels: int = 1) -> bytes:
 
 
 # --------------------------------------------------------------------------
-# McKay header: 16-bit original length silently truncated anything over 64 KiB
+# container header: 16-bit original length silently truncated anything over 64 KiB
 # --------------------------------------------------------------------------
 
 
-class TestMcKayLargePayloads:
+class TestCompressLargePayloads:
     @pytest.mark.parametrize("n_floats", [4_000, 40_000, 100_000])
     def test_telemetry_roundtrip_above_64k(self, n_floats):
         data = _telemetry(n_floats)
-        out = mckay.decompress(mckay.compress(data, "TELEMETRY", channels=1))
+        out = compress.decompress(compress.compress(data, "TELEMETRY", channels=1))
         assert len(out) == len(data)
 
     @pytest.mark.parametrize("n_floats", [4_000, 20_000, 60_000])
     def test_binary_float_roundtrip_above_64k(self, n_floats):
         data = struct.pack(f">{n_floats}f", *[i * 0.5 for i in range(n_floats)])
-        assert mckay.decompress(mckay.compress(data, "BINARY")) == data
+        assert compress.decompress(compress.compress(data, "BINARY")) == data
 
     def test_text_roundtrip_above_64k(self):
         data = ("Satellite telemetry nominal. Battery temperature nominal. " * 3000)
         data = data.encode()
         assert len(data) > 65535
-        assert mckay.decompress(mckay.compress(data, "TEXT")) == data
+        assert compress.decompress(compress.compress(data, "TEXT")) == data
 
     def test_header_declares_true_length(self):
         data = _telemetry(50_000)
-        stream = mckay.compress(data, "TELEMETRY", channels=1)
-        _v, _t, orig_len, _ch, _e, _p = mckay._parse_header(stream)
+        stream = compress.compress(data, "TELEMETRY", channels=1)
+        _v, _t, orig_len, _ch, _e, _p = compress._parse_header(stream)
         assert orig_len == len(data)
-        assert mckay.stats(stream)["original_size"] == len(data)
+        assert compress.stats(stream)["original_size"] == len(data)
 
     def test_version_is_3(self):
-        assert mckay.MCKAY_VERSION == 3
-        assert mckay.compress(b"hello world")[2] == 3
+        assert compress.COMPRESS_VERSION == 3
+        assert compress.compress(b"hello world")[2] == 3
 
     def test_legacy_v2_stream_still_decodes(self):
         """A v2 stream under the old 16-bit limit must keep working."""
         payload = _telemetry(1000)
-        v3 = mckay.compress(payload, "TELEMETRY", channels=1)
-        _v, tid, orig_len, ch, entropy, body = mckay._parse_header(v3)
+        v3 = compress.compress(payload, "TELEMETRY", channels=1)
+        _v, tid, orig_len, ch, entropy, body = compress._parse_header(v3)
         v2 = (
-            mckay.MAGIC
+            compress.MAGIC
             + bytes([2, tid])
-            + mckay._pack_u16(orig_len)
+            + compress._pack_u16(orig_len)
             + bytes([ch, entropy])
             + body
         )
-        assert len(mckay.decompress(v2)) == len(payload)
+        assert len(compress.decompress(v2)) == len(payload)
 
     def test_legacy_v2_truncated_length_is_reported_not_guessed(self):
         """v2 could not represent >=65535; say so instead of returning junk."""
         payload = _telemetry(40_000)
-        v3 = mckay.compress(payload, "TELEMETRY", channels=1)
-        _v, tid, _orig, ch, entropy, body = mckay._parse_header(v3)
+        v3 = compress.compress(payload, "TELEMETRY", channels=1)
+        _v, tid, _orig, ch, entropy, body = compress._parse_header(v3)
         v2 = (
-            mckay.MAGIC
+            compress.MAGIC
             + bytes([2, tid])
-            + mckay._pack_u16(0xFFFF)
+            + compress._pack_u16(0xFFFF)
             + bytes([ch, entropy])
             + body
         )
         with pytest.raises(ValueError, match="truncated"):
-            mckay.decompress(v2)
+            compress.decompress(v2)
 
     def test_ragged_telemetry_is_rejected(self):
         with pytest.raises(ValueError, match="multiple of 4"):
-            mckay.compress(b"\x00" * 33, "TELEMETRY", channels=1)
+            compress.compress(b"\x00" * 33, "TELEMETRY", channels=1)
         with pytest.raises(ValueError, match="whole number"):
-            mckay.compress(_telemetry(10), "TELEMETRY", channels=3)
+            compress.compress(_telemetry(10), "TELEMETRY", channels=3)
 
 
 class TestRustDetection:
     def test_stub_namespace_package_is_not_treated_as_available(self):
         """
-        The un-built `astral_compress/` directory imports as an empty
+        The un-built `gistlink_native/` directory imports as an empty
         namespace package. Selecting the Rust path against it made every
         compression emit a fallback warning.
         """
-        if not mckay._RUST_AVAILABLE:
-            assert not mckay._rust_has("compress_text")
+        if not compress._RUST_AVAILABLE:
+            assert not compress._rust_has("compress_text")
         else:
-            assert hasattr(mckay._ac, "compress_text")
+            assert hasattr(compress._ac, "compress_text")
 
     def test_compression_emits_no_fallback_warnings(self):
         with warnings.catch_warnings():
             warnings.simplefilter("error")
-            mckay.decompress(mckay.compress(b"nominal telemetry " * 100, "TEXT"))
-            mckay.decompress(mckay.compress(_telemetry(400), "TELEMETRY", channels=1))
+            compress.decompress(compress.compress(b"nominal telemetry " * 100, "TEXT"))
+            compress.decompress(compress.compress(_telemetry(400), "TELEMETRY", channels=1))
 
 
 # --------------------------------------------------------------------------
@@ -159,7 +160,7 @@ class TestTmFrameConformance:
         assert out[: len(data)] == data
 
     def test_resyncs_on_asm_when_capture_is_misaligned(self):
-        data = b"ASTRAL" * 200
+        data = b"GistLink" * 200
         wire = tmframe.encode_frames(data, scid=7)
         expected_frames = len(wire) // tmframe.WIRE_FRAME_SIZE
         for junk in (b"\x00", b"\xff" * 13, bytes(range(40))):
@@ -362,16 +363,16 @@ class TestAtomResync:
 
 
 # --------------------------------------------------------------------------
-# McKay over the fountain/atom layer
+# compression over the fountain/atom layer
 # --------------------------------------------------------------------------
 
 
-class TestMcKayOverAtoms:
+class TestCompressionOverAtoms:
     def test_roundtrip_and_wire_level_compression(self):
         payload = ("Satellite telemetry nominal. Battery temperature nominal. " * 200)
         payload = payload.encode()
-        stream = codec.pack_mckay_message(payload, "TEXT")
-        result = codec.unpack_mckay_stream(stream)
+        stream = codec.pack_compressed_message(payload, "TEXT")
+        result = codec.unpack_compressed_stream(stream)
         assert result["data"] == payload
         assert result["complete"] is True
         # The whole point: smaller on the wire than the source, redundancy
@@ -380,30 +381,30 @@ class TestMcKayOverAtoms:
 
     def test_telemetry_roundtrip(self):
         data = _telemetry(8000)
-        stream = codec.pack_mckay_message(data, "TELEMETRY", channels=1)
-        result = codec.unpack_mckay_stream(stream)
+        stream = codec.pack_compressed_message(data, "TELEMETRY", channels=1)
+        result = codec.unpack_compressed_stream(stream)
         assert len(result["data"]) == len(data)
 
     def test_gist_survives_total_fountain_loss(self):
         payload = b"telemetry nominal " * 500
-        stream = codec.pack_mckay_message(payload, "TEXT")
+        stream = codec.pack_compressed_message(payload, "TEXT")
         atoms = [stream[i : i + 32] for i in range(0, len(stream), 32)]
         gist_only = b"".join(
-            a for a in atoms if a[9] in (container.HEADER_GIST, container.MCKAY_GIST)
+            a for a in atoms if a[9] in (container.HEADER_GIST, container.COMPRESSED_GIST)
         )
         result = codec.unpack_stream(gist_only)
         assert result["complete"] is False
-        assert result["mckay"]["original_size"] == len(payload)
-        assert result["mckay"]["data_type"] == "TEXT"
-        assert result["mckay"]["ratio"] > 1.0
+        assert result["compression"]["original_size"] == len(payload)
+        assert result["compression"]["data_type"] == "TEXT"
+        assert result["compression"]["ratio"] > 1.0
 
-    def test_rejects_non_mckay_stream(self):
+    def test_rejects_non_compressed_stream(self):
         stream = codec.pack_text_message("hello")
-        assert "error" in codec.unpack_mckay_stream(stream)
+        assert "error" in codec.unpack_compressed_stream(stream)
 
     def test_bad_data_type_rejected(self):
         with pytest.raises(ValueError):
-            codec.pack_mckay_message(b"x", "NOT_A_TYPE")
+            codec.pack_compressed_message(b"x", "NOT_A_TYPE")
 
 
 class TestHeaderRedundancy:
@@ -453,7 +454,7 @@ class TestSpacePacketWrapping:
         counter = SpacePacketSequenceCounter()
         stream = codec.pack_message({"type": "DETECT", "object": "BASALT"})
         packet = wrap(stream, "DETECT", counter)
-        assert unwrap(packet)["astral_stream"] == stream
+        assert unwrap(packet)["gistlink_stream"] == stream
 
     def test_sequence_counter_set(self):
         counter = SpacePacketSequenceCounter()
@@ -464,7 +465,7 @@ class TestSpacePacketWrapping:
 
 class TestCliSurface:
     def test_wrap_sp_roundtrip(self, tmp_path):
-        from astral.cli import main
+        from gistlink.cli import main
 
         src = tmp_path / "msg.json"
         src.write_text(json.dumps({"type": "DETECT", "object": "H2O_ICE"}))
@@ -472,21 +473,21 @@ class TestCliSurface:
         wrapped = tmp_path / "sp.bin"
         assert main(["pack", str(src), str(packed)]) == 0
         assert main(["wrap-sp", str(packed), str(wrapped), "--msg-type", "DETECT"]) == 0
-        assert unwrap(wrapped.read_bytes())["astral_stream"] == packed.read_bytes()
+        assert unwrap(wrapped.read_bytes())["gistlink_stream"] == packed.read_bytes()
 
-    def test_pack_and_unpack_mckay(self, tmp_path):
-        from astral.cli import main
+    def test_pack_and_unpack_compress(self, tmp_path):
+        from gistlink.cli import main
 
         src = tmp_path / "data.bin"
         src.write_bytes(b"nominal telemetry downlink " * 400)
         packed = tmp_path / "mk.bin"
         out = tmp_path / "recovered.bin"
-        assert main(["pack-mckay", str(src), str(packed), "--type", "TEXT"]) == 0
-        assert main(["unpack-mckay", str(packed), str(out)]) == 0
+        assert main(["pack-file", str(src), str(packed), "--type", "TEXT"]) == 0
+        assert main(["unpack-file", str(packed), str(out)]) == 0
         assert out.read_bytes() == src.read_bytes()
 
     def test_simulate_is_reproducible_with_seed(self, tmp_path):
-        from astral.cli import main
+        from gistlink.cli import main
 
         src = tmp_path / "msg.json"
         src.write_text(json.dumps({"type": "DETECT", "object": "H2O_ICE"}))
@@ -512,10 +513,10 @@ class TestRedundancyControl:
         payload = bytes(
             (i * 37 + (i // 251)) % 256 for i in range(40_000)
         )
-        big = codec.pack_mckay_message(payload, "BINARY", redundancy=1.0)
-        small = codec.pack_mckay_message(payload, "BINARY", redundancy=0.3)
+        big = codec.pack_compressed_message(payload, "BINARY", redundancy=1.0)
+        small = codec.pack_compressed_message(payload, "BINARY", redundancy=0.3)
         assert len(small) < len(big) * 0.8
-        assert codec.unpack_mckay_stream(small)["data"] == payload
+        assert codec.unpack_compressed_stream(small)["data"] == payload
 
     def test_negative_redundancy_rejected(self):
         with pytest.raises(ValueError):
@@ -531,7 +532,7 @@ class TestPayloadIntegrity:
 
     @staticmethod
     def _corrupt_one_atom(blob: bytes, which: int = 0) -> bytes:
-        from astral.crc import crc8_j1850
+        from gistlink.crc import crc8_j1850
 
         atoms = [bytearray(blob[i : i + 32]) for i in range(0, len(blob), 32)]
         fountain = [a for a in atoms if a[9] == container.FOUNTAIN_PACKET]
@@ -548,7 +549,7 @@ class TestPayloadIntegrity:
 
     def test_header_carries_the_payload_crc(self):
         payload = b"telemetry nominal " * 20
-        stream = codec.pack_mckay_message(payload, "TEXT")
+        stream = codec.pack_compressed_message(payload, "TEXT")
         header = next(
             a.payload
             for a in container.parse_atoms(stream)
@@ -570,7 +571,7 @@ class TestPayloadIntegrity:
         silently_wrong = 0
         detected = 0
         for seed in range(30):
-            blob = codec.pack_mckay_message(
+            blob = codec.pack_compressed_message(
                 payload, "BINARY", message_id=seed + 1, redundancy=0.05,
                 min_redundancy=1,
             )
@@ -591,15 +592,15 @@ class TestPayloadIntegrity:
     def test_gist_still_available_when_integrity_fails(self):
         payload = bytes((i * 13 + 5) % 256 for i in range(600))
         for seed in range(30):
-            blob = codec.pack_mckay_message(
+            blob = codec.pack_compressed_message(
                 payload, "BINARY", message_id=seed + 1, redundancy=0.05,
                 min_redundancy=1,
             )
             result = codec.unpack_stream(self._corrupt_one_atom(blob, seed))
             if result.get("integrity_ok") is False:
                 # A failed payload still leaves the operator the gist.
-                assert result["gist"]["type"] == "MCKAY"
-                assert result["mckay"]["original_size"] == len(payload)
+                assert result["gist"]["type"] == "COMPRESS"
+                assert result["compression"]["original_size"] == len(payload)
                 return
         pytest.fail("no corruption reached the fountain solution")
 
@@ -614,7 +615,7 @@ class TestWireFormatStability:
     @staticmethod
     def _dense_sample(seed, n, k):
         """The original materialised Fisher-Yates, kept as the reference."""
-        from astral.fountain import _Xorshift32
+        from gistlink.fountain import _Xorshift32
 
         rng = _Xorshift32(seed)
         pool = list(range(n))
@@ -624,12 +625,12 @@ class TestWireFormatStability:
         return pool[:k]
 
     def test_prng_test_vector(self):
-        from astral.fountain import _Xorshift32
+        from gistlink.fountain import _Xorshift32
 
         assert _Xorshift32(1).next_u32() == 270369
 
     def test_sparse_sampler_matches_dense_reference(self):
-        from astral.fountain import _Xorshift32
+        from gistlink.fountain import _Xorshift32
 
         for seed in range(1, 60):
             for n in (1, 2, 3, 5, 16, 97, 256, 1000):
@@ -640,7 +641,7 @@ class TestWireFormatStability:
                     ), f"sampler diverged at seed={seed} n={n} k={k}"
 
     def test_crc8_matches_bitwise_reference(self):
-        from astral.crc import crc8_j1850
+        from gistlink.crc import crc8_j1850
 
         def reference(data):
             crc = 0xFF
@@ -660,7 +661,7 @@ class TestWireFormatStability:
             assert crc8_j1850(data) == reference(data)
 
     def test_crc16_check_value(self):
-        from astral.crc import crc16_ccitt
+        from gistlink.crc import crc16_ccitt
 
         # The published CRC-16/CCITT-FALSE check value, which is the variant
         # CCSDS uses for the TM frame FECF.
@@ -694,8 +695,8 @@ class TestLargeMessagePerformance:
         rng = random.Random(3)
         payload = bytes(rng.randrange(256) for _ in range(200_000))
         start = time.perf_counter()
-        stream = codec.pack_mckay_message(payload, "BINARY", redundancy=0.3)
-        result = codec.unpack_mckay_stream(stream)
+        stream = codec.pack_compressed_message(payload, "BINARY", redundancy=0.3)
+        result = codec.unpack_compressed_stream(stream)
         elapsed = time.perf_counter() - start
         assert result["data"] == payload
         assert result["integrity_ok"] is True
@@ -716,7 +717,7 @@ class TestPythonVersionSupport:
         import pathlib
         import re as _re
 
-        package = pathlib.Path(__file__).resolve().parent.parent / "astral"
+        package = pathlib.Path(__file__).resolve().parent.parent / "gistlink"
         offenders = []
         signature = _re.compile(r"^\s*def .*\|", _re.MULTILINE)
         for path in sorted(package.glob("*.py")):
@@ -754,7 +755,7 @@ class TestHeaderBoundIntegrity:
 
     @staticmethod
     def _flip_gist_type(stream: bytes, copies=None) -> bytes:
-        from astral.crc import crc8_j1850
+        from gistlink.crc import crc8_j1850
 
         atoms = [bytearray(stream[i : i + 32]) for i in range(0, len(stream), 32)]
         headers = [a for a in atoms if a[9] == container.HEADER_GIST]
@@ -835,27 +836,27 @@ class TestCommandAuthentication:
     BURN = {"name": "BURN", "thruster_id": 1, "duration_ms": 12500}
 
     def test_decoding_without_a_key_raises(self):
-        from astral.commands import CommandAuthError, decode_cmd, encode_cmd
+        from gistlink.commands import CommandAuthError, decode_cmd, encode_cmd
 
         with pytest.raises(CommandAuthError):
             decode_cmd(encode_cmd(self.BURN, key=self.KEY))
 
     def test_stripped_hmac_is_refused(self):
         """The downgrade attack: remove the trailer and hope nobody checks."""
-        from astral.commands import CommandAuthError, decode_cmd, encode_cmd
+        from gistlink.commands import CommandAuthError, decode_cmd, encode_cmd
 
         with pytest.raises(CommandAuthError):
             decode_cmd(encode_cmd(self.BURN), key=self.KEY)
 
     def test_wrong_key_is_refused(self):
-        from astral.commands import CommandAuthError, decode_cmd, encode_cmd
+        from gistlink.commands import CommandAuthError, decode_cmd, encode_cmd
 
         signed = encode_cmd(self.BURN, key=self.KEY)
         with pytest.raises(CommandAuthError):
             decode_cmd(signed, key=b"x" * 16)
 
     def test_unverified_results_always_say_so(self):
-        from astral.commands import decode_cmd, encode_cmd
+        from gistlink.commands import decode_cmd, encode_cmd
 
         for blob in (encode_cmd(self.BURN), encode_cmd(self.BURN, key=self.KEY)):
             out = decode_cmd(blob, require_auth=False)
@@ -863,7 +864,7 @@ class TestCommandAuthentication:
             assert out["auth_ok"] is False
 
     def test_replay_is_rejected(self):
-        from astral.commands import (
+        from gistlink.commands import (
             CommandAuthError,
             CommandSequencer,
             ReplayGuard,
@@ -884,7 +885,7 @@ class TestCommandAuthentication:
             decode_cmd(second, key=self.KEY, replay_guard=guard)
 
     def test_guard_does_not_advance_on_a_rejected_command(self):
-        from astral.commands import ReplayGuard, decode_cmd, encode_cmd
+        from gistlink.commands import ReplayGuard, decode_cmd, encode_cmd
 
         guard = ReplayGuard()
         decode_cmd(
@@ -902,7 +903,7 @@ class TestCommandAuthentication:
         assert guard.last_accepted == 5  # a bad MAC must not move the window
 
     def test_unpack_stream_verifies_commands(self):
-        from astral.commands import ReplayGuard
+        from gistlink.commands import ReplayGuard
 
         stream = codec.pack_cmd_message(self.BURN, key=self.KEY, counter=3)
         guard = ReplayGuard()
@@ -926,7 +927,7 @@ class TestCommandAuthentication:
         assert result["command_authenticated"] is None
 
     def test_tampered_command_body_is_refused(self):
-        from astral.commands import CommandAuthError, decode_cmd, encode_cmd
+        from gistlink.commands import CommandAuthError, decode_cmd, encode_cmd
 
         blob = bytearray(encode_cmd(self.BURN, key=self.KEY, counter=1))
         blob[4] ^= 0x01  # change the burn duration
@@ -934,7 +935,7 @@ class TestCommandAuthentication:
             decode_cmd(bytes(blob), key=self.KEY)
 
     def test_batch_authentication(self):
-        from astral.commands import CommandAuthError, decode_cmd_batch, encode_cmd_batch
+        from gistlink.commands import CommandAuthError, decode_cmd_batch, encode_cmd_batch
 
         batch = {
             "policy": {"rollback_on_fail": True},
@@ -946,3 +947,568 @@ class TestCommandAuthentication:
         assert out["items"][0]["cmd"]["duration_ms"] == 12500
         with pytest.raises(CommandAuthError):
             decode_cmd_batch(encode_cmd_batch(batch), key=self.KEY)
+
+
+class TestPersistentReplayGuard:
+    """
+    The in-memory guard forgets everything when the receiver restarts, so a
+    recorded BURN could be replayed after a process bounce. The persistent
+    guard keeps the high-water mark on disk.
+    """
+
+    KEY = b"k" * 16
+    BURN = {"name": "BURN", "thruster_id": 1, "duration_ms": 12500}
+
+    def _signed(self, counter):
+        from gistlink.commands import encode_cmd
+
+        return encode_cmd(self.BURN, key=self.KEY, counter=counter)
+
+    def test_survives_a_restart(self, tmp_path):
+        from gistlink.commands import (
+            CommandAuthError,
+            PersistentReplayGuard,
+            decode_cmd,
+        )
+
+        path = tmp_path / "uplink.json"
+        blob = self._signed(7)
+        decode_cmd(blob, key=self.KEY, replay_guard=PersistentReplayGuard(path))
+        # A brand new guard object stands in for a restarted receiver.
+        with pytest.raises(CommandAuthError, match="replayed"):
+            decode_cmd(blob, key=self.KEY, replay_guard=PersistentReplayGuard(path))
+
+    def test_in_memory_guard_does_not_survive_a_restart(self):
+        """Documents why the persistent one exists."""
+        from gistlink.commands import ReplayGuard, decode_cmd
+
+        blob = self._signed(7)
+        decode_cmd(blob, key=self.KEY, replay_guard=ReplayGuard())
+        # Same bytes, new guard: accepted, which is the hazard.
+        out = decode_cmd(blob, key=self.KEY, replay_guard=ReplayGuard())
+        assert out["authenticated"] is True
+
+    def test_counter_is_durable_before_the_command_is_accepted(self, tmp_path):
+        """
+        A crash must not leave a command executed but unrecorded, so the write
+        happens first. The file already holds the counter by the time validate
+        returns.
+        """
+        import json
+
+        from gistlink.commands import PersistentReplayGuard
+
+        path = tmp_path / "uplink.json"
+        guard = PersistentReplayGuard(path, "sat-1")
+        guard.validate(11)
+        assert json.loads(path.read_text())["links"]["sat-1"] == 11
+
+    def test_links_are_independent(self, tmp_path):
+        from gistlink.commands import PersistentReplayGuard
+
+        path = tmp_path / "uplink.json"
+        PersistentReplayGuard(path, "sat-1").validate(5)
+        assert PersistentReplayGuard(path, "sat-2").last_accepted == -1
+        assert PersistentReplayGuard(path, "sat-1").last_accepted == 5
+
+    def test_corrupt_state_is_refused_not_silently_reset(self, tmp_path):
+        from gistlink.commands import PersistentReplayGuard, ReplayStateError
+
+        path = tmp_path / "uplink.json"
+        PersistentReplayGuard(path).validate(3)
+        path.write_text("{ this is not json")
+        with pytest.raises(ReplayStateError):
+            PersistentReplayGuard(path)
+
+    def test_missing_state_is_a_first_run(self, tmp_path):
+        from gistlink.commands import PersistentReplayGuard, ReplayStateError
+
+        path = tmp_path / "does-not-exist.json"
+        assert PersistentReplayGuard(path).last_accepted == -1
+        with pytest.raises(ReplayStateError):
+            PersistentReplayGuard(path, require_existing=True)
+
+    def test_rejected_command_does_not_advance_persisted_state(self, tmp_path):
+        import json
+
+        from gistlink.commands import CommandAuthError, PersistentReplayGuard, decode_cmd
+
+        path = tmp_path / "uplink.json"
+        guard = PersistentReplayGuard(path)
+        decode_cmd(self._signed(9), key=self.KEY, replay_guard=guard)
+        with pytest.raises(CommandAuthError):
+            decode_cmd(self._signed(4), key=self.KEY, replay_guard=guard)
+        assert json.loads(path.read_text())["links"]["default"] == 9
+
+    def test_unwritable_state_refuses_the_command(self, tmp_path, monkeypatch):
+        """If the counter cannot be recorded, the command must not be accepted."""
+        from gistlink.commands import PersistentReplayGuard, ReplayStateError
+
+        guard = PersistentReplayGuard(tmp_path / "uplink.json")
+
+        def boom(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr("gistlink.commands.tempfile.mkstemp", boom)
+        with pytest.raises(ReplayStateError, match="could not record"):
+            guard.validate(1)
+        assert guard.last_accepted == -1  # not accepted in memory either
+
+    def test_no_temporary_files_left_behind(self, tmp_path, monkeypatch):
+        from gistlink.commands import PersistentReplayGuard, ReplayStateError
+
+        path = tmp_path / "uplink.json"
+        guard = PersistentReplayGuard(path)
+        guard.validate(1)
+
+        real_replace = os.replace
+
+        def failing_replace(src, dst):
+            raise OSError("interrupted")
+
+        monkeypatch.setattr("gistlink.commands.os.replace", failing_replace)
+        with pytest.raises(ReplayStateError):
+            guard.validate(2)
+        monkeypatch.setattr("gistlink.commands.os.replace", real_replace)
+        leftovers = list(tmp_path.glob(".gistlink-replay-*"))
+        assert leftovers == []
+
+    def test_end_to_end_through_unpack_stream(self, tmp_path):
+        from gistlink.commands import PersistentReplayGuard
+
+        path = tmp_path / "uplink.json"
+        stream = codec.pack_cmd_message(self.BURN, key=self.KEY, counter=2)
+        first = codec.unpack_stream(
+            stream, key=self.KEY, replay_guard=PersistentReplayGuard(path)
+        )
+        assert first["command_authenticated"] is True
+        second = codec.unpack_stream(
+            stream, key=self.KEY, replay_guard=PersistentReplayGuard(path)
+        )
+        assert second["command_authenticated"] is False
+        assert "replayed" in second["error"]
+
+
+class TestMissionDictionaries:
+    """
+    Short messages are where a general compressor has least to work with, and
+    where GistLink is meant to operate. A dictionary trained on past traffic
+    gives the compressor the cross-message context it otherwise lacks.
+    """
+
+    WORDS = ["satellite", "telemetry", "nominal", "battery", "temperature",
+             "attitude", "command", "systems", "payload", "critical"]
+
+    def _corpus(self, n=400, seed=5):
+        rng = random.Random(seed)
+        return [
+            (" ".join(rng.choice(self.WORDS) for _ in range(rng.randint(6, 14))) + ".").encode()
+            for _ in range(n)
+        ]
+
+    @pytest.fixture
+    def trained(self):
+        md = pytest.importorskip("gistlink.dictionary")
+        if not md.available():
+            pytest.skip("requires the 'dict' extra (zstandard)")
+        corpus = self._corpus()
+        return md, md.train(corpus[:300], name="test-v1"), corpus[300:]
+
+    def test_beats_the_builtin_transform_on_short_messages(self, trained):
+        md, dictionary, tests = trained
+        plain = sum(len(compress.compress(m, "TEXT")) for m in tests)
+        dicted = sum(len(compress.compress(m, "TEXT", dictionary=dictionary)) for m in tests)
+        assert dicted < plain * 0.9, f"dictionary gave {dicted} vs {plain}"
+
+    def test_roundtrip(self, trained):
+        md, dictionary, tests = trained
+        registry = md.DictionaryRegistry([dictionary])
+        for message in tests[:20]:
+            blob = compress.compress(message, "TEXT", dictionary=dictionary)
+            assert compress.decompress(blob, dictionaries=registry) == message
+
+    def test_compact_header_is_three_bytes(self, trained):
+        md, dictionary, tests = trained
+        blob = compress.compress(tests[0], "TEXT", dictionary=dictionary)
+        assert blob[:2] == compress.MAGIC
+        assert blob[2] >> 4 == compress.COMPRESS_VERSION_COMPACT
+        assert blob[2] & 0x0F == compress.TRANSFORM_ZSTD_DICT
+        # The payload is a bare zstd frame: length and dict id live in it.
+        assert len(blob) == len(dictionary.compress(tests[0])) + 3
+
+    def test_stats_reads_the_length_from_the_frame(self, trained):
+        md, dictionary, tests = trained
+        blob = compress.compress(tests[0], "TEXT", dictionary=dictionary)
+        assert compress.stats(blob)["original_size"] == len(tests[0])
+        assert compress.stats(blob)["transform"] == "zstd_dict"
+
+    def test_missing_dictionary_names_the_id(self, trained):
+        md, dictionary, tests = trained
+        blob = compress.compress(tests[0], "TEXT", dictionary=dictionary)
+        with pytest.raises(compress.MissingDictionaryError) as excinfo:
+            compress.decompress(blob)
+        assert excinfo.value.dict_id == dictionary.dict_id
+
+    def test_transmission_layer_reports_a_missing_dictionary(self, trained):
+        md, dictionary, tests = trained
+        stream = codec.pack_compressed_message(tests[0], "TEXT", dictionary=dictionary)
+        result = codec.unpack_compressed_stream(stream)
+        assert result["missing_dictionary"] == dictionary.dict_id
+        assert str(dictionary.dict_id) in result["error"]
+        # The gist survives, so an operator still learns what was sent.
+        assert result["compression"]["original_size"] == len(tests[0])
+        assert result["complete"] is False
+
+    def test_transmission_layer_roundtrip(self, trained):
+        md, dictionary, tests = trained
+        registry = md.DictionaryRegistry([dictionary])
+        stream = codec.pack_compressed_message(tests[0], "TEXT", dictionary=dictionary)
+        result = codec.unpack_compressed_stream(stream, dictionaries=registry)
+        assert result["data"] == tests[0]
+        assert result["integrity_ok"] is True
+
+    def test_dictionary_is_skipped_when_it_does_not_help(self, trained):
+        md, dictionary, _tests = trained
+        # A text dictionary has nothing to offer random bytes.
+        rng = random.Random(1)
+        noise = bytes(rng.randrange(256) for _ in range(64))
+        blob = compress.compress(noise, "BINARY", dictionary=dictionary)
+        assert blob[2] >> 4 != compress.COMPRESS_VERSION_COMPACT
+        assert compress.decompress(blob) == noise
+
+    def test_save_and_load(self, trained, tmp_path):
+        md, dictionary, tests = trained
+        path = tmp_path / "mission.dict"
+        dictionary.save(path)
+        loaded = md.MissionDictionary.load(path)
+        assert loaded.dict_id == dictionary.dict_id
+        assert loaded.decompress(dictionary.compress(tests[0])) == tests[0]
+
+    def test_registry_loads_a_directory(self, trained, tmp_path):
+        md, dictionary, _tests = trained
+        dictionary.save(tmp_path / "a.dict")
+        dictionary.save(tmp_path / "b.dict")
+        registry = md.DictionaryRegistry()
+        assert registry.load_dir(tmp_path) == 2
+        assert dictionary.dict_id in registry
+
+    def test_training_needs_enough_samples(self, trained):
+        md, _dictionary, _tests = trained
+        with pytest.raises(ValueError, match="at least"):
+            md.train([b"one", b"two"])
+
+
+class TestDictionaryNeverHurts:
+    """
+    A dictionary is a bet that the payload resembles the traffic it was
+    trained on. Measured, a mission-vocabulary dictionary made JSON status
+    messages 8% BIGGER and log lines 2% bigger, so applying one blindly is a
+    regression for anyone whose traffic differs from the training set. The
+    compressor produces both encodings and sends the smaller.
+    """
+
+    @pytest.fixture
+    def trained(self):
+        md = pytest.importorskip("gistlink.dictionary")
+        if not md.available():
+            pytest.skip("requires the 'dict' extra (zstandard)")
+        rng = random.Random(1)
+        vocab = ["satellite", "telemetry", "nominal", "battery", "attitude",
+                 "payload", "thruster", "downlink", "anomaly", "critical"]
+        corpus = [
+            (" ".join(rng.choice(vocab) for _ in range(rng.randint(6, 16))) + ".").encode()
+            for _ in range(400)
+        ]
+        return md, md.train(corpus, name="mission")
+
+    @pytest.mark.parametrize(
+        "sample",
+        [
+            b'{"t":12,"sc":"KESTREL-2","mode":"SCIENCE","batt":87,"temp":-14.2}',
+            b"2026-09-15T04:11:11Z SUBSYS=EPS volt=28.4V temp=-14.2C state=NOMINAL",
+            b"The quick brown fox jumps over the lazy dog near the riverbank.",
+            bytes(range(256)),
+            b"",
+        ],
+    )
+    def test_never_larger_than_without_a_dictionary(self, trained, sample):
+        md, dictionary = trained
+        without = compress.compress(sample, "TEXT")
+        with_dict = compress.compress(sample, "TEXT", dictionary=dictionary)
+        assert len(with_dict) <= len(without), (
+            f"dictionary cost {len(with_dict) - len(without)} extra bytes"
+        )
+
+    def test_still_wins_on_matching_traffic(self, trained):
+        md, dictionary = trained
+        rng = random.Random(99)
+        vocab = ["satellite", "telemetry", "nominal", "battery", "attitude",
+                 "payload", "thruster", "downlink", "anomaly", "critical"]
+        msgs = [
+            (" ".join(rng.choice(vocab) for _ in range(rng.randint(6, 16))) + ".").encode()
+            for _ in range(60)
+        ]
+        without = sum(len(compress.compress(m, "TEXT")) for m in msgs)
+        with_dict = sum(len(compress.compress(m, "TEXT", dictionary=dictionary)) for m in msgs)
+        assert with_dict < without * 0.85
+
+    def test_fallback_output_still_roundtrips(self, trained):
+        """When the dictionary loses, the result must decode without it."""
+        md, dictionary = trained
+        sample = b'{"t":12,"sc":"KESTREL-2","mode":"SCIENCE","batt":87}'
+        blob = compress.compress(sample, "TEXT", dictionary=dictionary)
+        assert compress.decompress(blob) == sample  # no registry needed
+
+
+class TestDictionaryConfiguration:
+    """GISTLINK_DICT makes a trained dictionary the default without --dict."""
+
+    @pytest.fixture
+    def trained(self, tmp_path):
+        md = pytest.importorskip("gistlink.dictionary")
+        if not md.available():
+            pytest.skip("requires the 'dict' extra (zstandard)")
+        rng = random.Random(2)
+        vocab = ["satellite", "telemetry", "nominal", "battery", "attitude"]
+        corpus = [
+            (" ".join(rng.choice(vocab) for _ in range(10)) + ".").encode()
+            for _ in range(200)
+        ]
+        dictionary = md.train(corpus)
+        path = tmp_path / "mission.dict"
+        dictionary.save(path)
+        return md, dictionary, path
+
+    def test_unset_means_no_dictionary(self, trained, monkeypatch):
+        md, _dictionary, _path = trained
+        monkeypatch.delenv(md.ENV_VAR, raising=False)
+        assert md.configured_paths() == []
+        assert md.default_dictionary() is None
+        assert len(md.configured_registry()) == 0
+
+    def test_configured_dictionary_is_found(self, trained, monkeypatch):
+        md, dictionary, path = trained
+        monkeypatch.setenv(md.ENV_VAR, str(path))
+        assert md.default_dictionary().dict_id == dictionary.dict_id
+        assert dictionary.dict_id in md.configured_registry()
+
+    def test_several_paths(self, trained, monkeypatch, tmp_path):
+        md, dictionary, path = trained
+        second = tmp_path / "other.dict"
+        dictionary.save(second)
+        monkeypatch.setenv(md.ENV_VAR, os.pathsep.join([str(path), str(second)]))
+        assert len(md.configured_paths()) == 2
+
+    def test_cli_uses_the_configured_dictionary(self, trained, monkeypatch, tmp_path):
+        from gistlink.cli import main
+
+        md, dictionary, path = trained
+        monkeypatch.setenv(md.ENV_VAR, str(path))
+        source = tmp_path / "report.txt"
+        source.write_bytes(b"satellite telemetry nominal battery attitude nominal.")
+        packed, out = tmp_path / "p.bin", tmp_path / "out.txt"
+        assert main(["pack-file", str(source), str(packed), "--type", "TEXT"]) == 0
+        assert main(["unpack-file", str(packed), str(out)]) == 0
+        assert out.read_bytes() == source.read_bytes()
+
+
+class TestTextTransformRobustness:
+    """
+    `compress(data, "TEXT")` raised UnicodeDecodeError on bytes that are not
+    valid UTF-8, turning a caller's wrong type hint into a lost message. The
+    abbreviation step is skipped instead.
+    """
+
+    @pytest.mark.parametrize(
+        "sample",
+        [bytes(range(256)), b"\xff\xfe\x00binary", b"\x80\x81\x82", b""],
+    )
+    def test_non_utf8_declared_as_text(self, sample):
+        assert compress.decompress(compress.compress(sample, "TEXT")) == sample
+
+    def test_utf8_text_still_uses_abbreviation_coding(self):
+        """The fallback must not have disabled the transform for real text."""
+        text = ("satellite telemetry nominal battery temperature " * 40).encode()
+        blob = compress.compress(text, "TEXT")
+        assert blob[3] == compress.TRANSFORM_TEXT
+        assert compress.decompress(blob) == text
+
+
+class TestFountainAlwaysSolvable:
+    """
+    A randomly drawn packet set can be linearly dependent even with every
+    block covered and nothing lost. Measured before the fix: 0.5% of seeds at
+    K=3 with 13 packets produced a set that could not be decoded on a perfect
+    link, which surfaced as a 3.9 CI failure but was neither version nor
+    platform specific. For a command message that is a real loss.
+
+    The decoder derives each packet's indices from that packet's own seed, so
+    the encoder can choose seeds that span the whole message; redundant
+    packets are replaced until they do.
+    """
+
+    @pytest.mark.parametrize("K,M", [(1, 11), (2, 12), (3, 13), (5, 15),
+                                     (8, 18), (20, 40), (64, 128)])
+    def test_every_complete_packet_set_decodes(self, K, M):
+        blocks = [bytes([i % 256]) * 16 for i in range(K)]
+        for seed in range(1, 400):
+            packets = lt_encode_blocks(blocks, seed=seed, num_packets=M)
+            decoded, fraction = lt_decode_blocks(packets, K, 16)
+            assert decoded == blocks, (
+                f"K={K} seed={seed} did not decode with all {M} packets "
+                f"present (recovered {fraction:.2f})"
+            )
+
+    def test_command_messages_always_decode_on_a_clean_link(self):
+        """The end-to-end shape of the CI failure."""
+        key = b"k" * 16
+        burn = {"name": "BURN", "thruster_id": 1, "duration_ms": 12500}
+        for _ in range(300):
+            stream = codec.pack_cmd_message(burn, key=key, counter=1)
+            result = codec.unpack_stream(stream)
+            assert result["command_authenticated"] is False, result.get("error")
+
+    def test_large_messages_skip_the_guarantee(self):
+        """It costs O(M*K) and the risk it covers is unmeasurable up there."""
+        from gistlink import fountain
+
+        assert fountain.RANK_GUARANTEE_MAX_K == 512
+
+    def test_decoder_is_unchanged_by_the_guarantee(self):
+        """
+        The repair only changes which seeds the encoder emits. A decoder that
+        knows nothing about it must still decode, which is what keeps this a
+        non-breaking change.
+        """
+        blocks = [bytes([i]) * 16 for i in range(6)]
+        packets = lt_encode_blocks(blocks, seed=11, num_packets=16)
+        for packet_seed, degree, payload in packets:
+            assert 0 <= packet_seed <= 0xFFFFFFFF
+            assert 1 <= degree <= len(blocks)
+            assert len(payload) == 16
+        assert lt_decode_blocks(packets, 6, 16)[0] == blocks
+
+
+class TestTextTransformLabelling:
+    """
+    The transform id has to record whether abbreviation coding was actually
+    applied: the decoder decides from it alone whether to run the abbreviation
+    decoder. Labelling an un-abbreviated payload TRANSFORM_TEXT produced two
+    failures, both raised by Codex on PR #6.
+    """
+
+    def test_compressible_non_utf8_roundtrips(self):
+        """Raised as a P1. My earlier test used only incompressible inputs,
+        which fall back to passthrough and so never hit this path."""
+        data = b"\xff" * 1000
+        blob = compress.compress(data, "TEXT")
+        assert blob[3] == compress.TRANSFORM_PASSTHROUGH
+        assert compress.decompress(blob) == data
+
+    def test_literal_marker_sequence_is_not_rewritten(self):
+        """
+        Valid UTF-8 containing the abbreviation marker came back with words
+        substituted into it: silent corruption, worse than the reported crash.
+        """
+        data = ("\x1e001 literal marker sequence " * 60).encode()
+        blob = compress.compress(data, "TEXT")
+        assert compress.decompress(blob) == data
+
+    def test_ordinary_text_still_uses_abbreviation_coding(self):
+        """The fix must not quietly disable the transform for real text."""
+        data = ("satellite telemetry nominal battery " * 50).encode()
+        blob = compress.compress(data, "TEXT")
+        assert blob[3] == compress.TRANSFORM_TEXT
+        assert compress.decompress(blob) == data
+        assert len(blob) < len(data) // 10
+
+    @pytest.mark.parametrize(
+        "data",
+        [b"", b"\xff" * 1000, bytes(range(256)), b"\x80\x81\x82" * 400,
+         "\x1e000\x1e011 mixed".encode(), "café " .encode() * 200],
+    )
+    def test_roundtrip_whatever_the_label(self, data):
+        assert compress.decompress(compress.compress(data, "TEXT")) == data
+
+
+class TestEmptyKeyRejected:
+    """
+    `key=b""` is falsy, so every `if key:` treated it as "no key at all":
+    signing was skipped and verification bypassed while the caller believed
+    they had supplied one. Raised as a P1 by Codex on PR #6.
+    """
+
+    BURN = {"name": "BURN", "thruster_id": 1, "duration_ms": 12500}
+
+    def test_encoding_with_an_empty_key_is_refused(self):
+        from gistlink.commands import encode_cmd, encode_cmd_batch
+
+        with pytest.raises(ValueError, match="empty"):
+            encode_cmd(self.BURN, key=b"")
+        batch = {"policy": {}, "items": [{"tai_offset_s": 1, "cmd": self.BURN}]}
+        with pytest.raises(ValueError, match="empty"):
+            encode_cmd_batch(batch, key=b"")
+
+    def test_decoding_with_an_empty_key_is_refused(self):
+        from gistlink.commands import decode_cmd, encode_cmd
+
+        signed = encode_cmd(self.BURN, key=b"k" * 16, counter=1)
+        with pytest.raises(ValueError, match="empty"):
+            decode_cmd(signed, key=b"")
+        # Even the explicit inspection path: an empty key is a mistake, not a
+        # way to opt out. None is the way to opt out.
+        with pytest.raises(ValueError, match="empty"):
+            decode_cmd(signed, key=b"", require_auth=False)
+
+    def test_real_keys_and_explicit_none_still_work(self):
+        from gistlink.commands import decode_cmd, encode_cmd
+
+        signed = encode_cmd(self.BURN, key=b"k" * 16, counter=1)
+        assert decode_cmd(signed, key=b"k" * 16)["authenticated"] is True
+        assert decode_cmd(signed, require_auth=False)["authenticated"] is False
+
+
+class TestPackagingExtras:
+    """
+    `gistlink[fast]` named a distribution nothing publishes, so the extra
+    failed to install at all. Raised as a P1 by Codex on PR #6.
+    """
+
+    def _extras(self):
+        import pathlib
+        import re
+
+        text = (pathlib.Path(__file__).resolve().parent.parent
+                / "pyproject.toml").read_text(encoding="utf-8")
+        block = text.split("[project.optional-dependencies]")[1]
+        block = block.split("\n[")[0]
+        return re.findall(r'"([^"]+)"', block)
+
+    def test_no_extra_names_an_unpublished_distribution(self):
+        named = {dep.split(">")[0].split("=")[0].strip() for dep in self._extras()}
+        # These are the names this repository itself builds; they are not on
+        # PyPI, so an extra that requires them cannot install.
+        assert "gistlink-compress" not in named
+        assert "gistlink-native" not in named
+        assert "gistlink_native" not in named
+
+    def test_extras_are_real_package_names(self):
+        expected = {"reedsolo", "zstandard", "pycodec2", "numpy", "zstd"}
+        named = {dep.split(">")[0].split("=")[0].strip() for dep in self._extras()}
+        assert named <= expected, f"unexpected dependency: {named - expected}"
+
+    @pytest.mark.parametrize(
+        "data",
+        [("\x1e001 literal marker " * 60).encode(), b"\x1e" * 500,
+         "\x1eff2 and \x1e000 mixed in prose ".encode() * 40],
+    )
+    def test_marker_bearing_text_skips_abbreviation(self, data):
+        """
+        Abbreviation coding is not injective: the decoder rewrites the marker
+        sequence wherever it appears. Text carrying the marker must therefore
+        not be abbreviated, on either backend. The Rust implementation shares
+        the flaw, so this only passes if the guard runs before that path too.
+        """
+        blob = compress.compress(data, "TEXT")
+        assert blob[3] == compress.TRANSFORM_PASSTHROUGH
+        assert compress.decompress(blob) == data

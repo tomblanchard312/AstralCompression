@@ -1,11 +1,11 @@
-# McKay + ASTRAL Integration Guide
+# GistLink Integration Guide
 
 How domain-aware compression and gist-first atomized transmission fit
 together, and how to drive them.
 
 ## The two layers
 
-**McKay** (`astral/mckay_astral_integration.py`) is a compressor. It picks a
+**GistLink** (`gistlink/compress.py`) is a compressor. It picks a
 transform from the data type, applies it, then entropy-codes the result:
 
 | Data type | Transform | Exact? |
@@ -16,27 +16,27 @@ transform from the data type, applies it, then entropy-codes the result:
 | `VOICE` | Codec2 re-encoding (needs the `voice` extra) | no |
 | `IMAGE` / other | passthrough | yes |
 
-**ASTRAL** (`astral/codec.py`) is a transmission format: 32-byte atoms, CRC-8
+**GistLink** (`gistlink/codec.py`) is a transmission format: 32-byte atoms, CRC-8
 per atom, a replicated gist, and an LT fountain code over the body.
 
-`pack_mckay_message` runs both: compress, describe, atomize, fountain-code.
+`pack_compressed_message` runs both: compress, describe, atomize, fountain-code.
 
 ## Usage
 
 ```python
-from astral import pack_mckay_message, unpack_mckay_stream
+from gistlink import pack_compressed_message, unpack_compressed_stream
 
 data = open("telemetry.bin", "rb").read()
 
-stream = pack_mckay_message(
+stream = pack_compressed_message(
     data,
     "TELEMETRY",
     channels=4,          # 0 auto-detects
     extra_fountain=20,   # additional redundancy atoms
 )
 
-result = unpack_mckay_stream(stream)
-result["mckay"]     # metadata gist, present whenever one gist atom survived
+result = unpack_compressed_stream(stream)
+result["compression"]     # metadata gist, present whenever one gist atom survived
 result["data"]      # recovered bytes, present only on full recovery
 result["complete"]  # bool
 result["recovered_fraction"]
@@ -45,18 +45,18 @@ result["recovered_fraction"]
 From the command line:
 
 ```bash
-python -m astral.cli pack-mckay telemetry.bin out.bin --type TELEMETRY --channels 4
-python -m astral.cli simulate out.bin lossy.bin --drop 0.5 --seed 1
-python -m astral.cli unpack-mckay lossy.bin recovered.bin
+python -m gistlink.cli pack-file telemetry.bin out.bin --type TELEMETRY --channels 4
+python -m gistlink.cli simulate out.bin lossy.bin --drop 0.5 --seed 1
+python -m gistlink.cli unpack-file lossy.bin recovered.bin
 ```
 
 ## What the gist gives you
 
-The `MCKAY_GIST` atom (atom type 3) is replicated alongside the header, so it
+The `COMPRESSED_GIST` atom (atom type 3) is replicated alongside the header, so it
 survives when no fountain packet does:
 
 ```python
-{'mckay_version': 3, 'transform_id': 1, 'data_type': 'TEXT',
+{'compress_version': 3, 'transform_id': 1, 'data_type': 'TEXT',
  'original_size': 9600, 'compressed_size': 68, 'channels': 0,
  'entropy_coder': 1, 'ratio': 141.176}
 ```
@@ -70,9 +70,9 @@ The gist lives only in the header atoms. If every copy is lost, the receiver
 gets nothing, so replication is the floor on survivability:
 
 ```python
-from astral import header_redundancy_for, pack_mckay_message
+from gistlink import header_redundancy_for, pack_compressed_message
 
-stream = pack_mckay_message(
+stream = pack_compressed_message(
     data, "TEXT",
     header_redundancy=header_redundancy_for(0.8),  # 21 copies -> 99% survival
 )
@@ -100,9 +100,9 @@ trials per cell:
 
 ## Measured compression
 
-From `python benchmarks/mckay_vs_standard.py` on this repository's generated datasets:
+From `python benchmarks/compression_benchmark.py` on this repository's generated datasets:
 
-| Dataset | McKay | zstd -9 | LZMA -9 |
+| Dataset | GistLink | zstd -9 | LZMA -9 |
 |---|---|---|---|
 | Telemetry, 160 KB, 4 channels | 3.60x (lossy) | 1.12x | 1.43x |
 | Binary float32, 100 KB, random | 1.17x | 1.08x | 1.08x |
@@ -125,11 +125,11 @@ redundancy is a fixed cost that only pays off with size.
 ## Compression without transmission
 
 ```python
-from astral import mckay_astral_integration as mckay
+from gistlink import compress as compress
 
-compressed = mckay.compress(data, "TELEMETRY", channels=4)
-restored = mckay.decompress(compressed)
-mckay.stats(compressed)
+compressed = compress.compress(data, "TELEMETRY", channels=4)
+restored = compress.decompress(compressed)
+compress.stats(compressed)
 # {'transform': 'telemetry', 'version': 3, 'original_size': 32000,
 #  'compressed_size': 1768, 'payload_size': 1758, 'ratio': 18.1, ...}
 ```
@@ -140,7 +140,7 @@ mckay.stats(compressed)
 
 | Offset | Size | Field |
 |---|---|---|
-| 0 | 2 | magic `MK` |
+| 0 | 2 | magic `GL` |
 | 2 | 1 | version (3) |
 | 3 | 1 | transform id |
 | 4 | 4 | original length, uint32 LE |
@@ -167,4 +167,4 @@ entry points, so an un-built source tree cannot masquerade as the fast path.
 - [../README.md](../README.md): project overview and measured performance
 - [FORMAT.md](FORMAT.md): the wire format specification
 - [QUICK_REFERENCE.md](QUICK_REFERENCE.md): command and API cheat sheet
-- `python -m astral.mckay_usage_example`: runnable demonstrations
+- `python examples/usage.py`: runnable demonstrations

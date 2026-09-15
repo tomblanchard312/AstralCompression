@@ -143,7 +143,7 @@ def _dict_tag(token: str) -> tuple[int, int] | None:
 
 def encode_text(s: str) -> bytes:
     """
-    Encode text to the ASTRAL text payload format.
+    Encode text to the GistLink text payload format.
 
     Dictionary words become one-byte tags plus a varint index; everything else
     is a literal. Separators that differ from what the decoder reinserts
@@ -221,7 +221,7 @@ def _decode_v1(b: bytes) -> str:
 
 def decode_text(b: bytes) -> str:
     """
-    Decode an ASTRAL text payload.
+    Decode an GistLink text payload.
 
     Raises ValueError on a malformed payload rather than returning a partial
     or invented string: callers (``codec.unpack_stream``) treat that as "not

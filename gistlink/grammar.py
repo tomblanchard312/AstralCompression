@@ -1,4 +1,4 @@
-"""Grammar encoding/decoding helpers for ASTRAL messages."""
+"""Grammar encoding/decoding helpers for GistLink messages."""
 
 from .bitstream import BitReader, BitWriter
 from .varint import leb128_decode, leb128_encode
@@ -21,7 +21,7 @@ DICT_TYPE = {
     "VOICE": 4,
     "CMD": 5,
     "CMD_BATCH": 6,
-    "MCKAY": 7,
+    "COMPRESS": 7,
 }
 
 _INV_TYPE = {v: k for k, v in DICT_TYPE.items()}

@@ -1,4 +1,4 @@
-"""Tests for the Rust astral_compress extension."""
+"""Tests for the Rust gistlink_native extension."""
 
 import lzma
 import struct
@@ -10,9 +10,9 @@ np = pytest.importorskip("numpy", reason="the Rust test suite needs numpy")
 
 # Try to import the Rust extension
 try:
-    import astral_compress as ac
+    import gistlink_native as ac
 
-    # The repo root holds an un-built `astral_compress/` source directory that
+    # The repo root holds an un-built `gistlink_native/` source directory that
     # imports as an empty namespace package, so importability alone does not
     # mean the extension is present.
     RUST_AVAILABLE = hasattr(ac, "compress_text")

@@ -1,10 +1,10 @@
 [package]
-name = "astral_compress"
+name = "gistlink_native"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "astral_compress"
+name = "gistlink_native"
 crate-type = ["cdylib"]
 
 [dependencies]

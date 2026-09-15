@@ -1,5 +1,69 @@
 # Changelog
 
+## 2.0.0 — renamed to GistLink
+
+The project was ASTRAL, and its compression engine was named after a fictional
+television character. Neither name said what the software does. It is now
+**GistLink**: gist-first, loss-tolerant messaging for one-way links.
+
+### Breaking
+- **Distribution renamed**: `pip install gistlink`, not `astral-compression`.
+- **Package renamed**: `import gistlink`, not `astral`.
+- **CLI renamed**: `gistlink`, not `astral`.
+- **Engine module**: `gistlink.compress`, was `astral.mckay_astral_integration`.
+- **API**: `pack_compressed_message` / `unpack_compressed_stream`, were
+  `pack_mckay_message` / `unpack_mckay_stream`. CLI subcommands `pack-file` /
+  `unpack-file`, were `pack-mckay` / `unpack-mckay`.
+- **Result key**: `result["compression"]`, was `result["mckay"]`.
+- **Environment variable**: `GISTLINK_DICT`, was `ASTRAL_DICT`.
+- **Container magic**: `GL`, was `MK`. This is the one wire-format change; the
+  atom format, fountain code, CCSDS layers and every other byte are untouched.
+  Nothing was published under the old magic, so no deployed receiver breaks.
+- `spacepacket.unwrap()` returns `gistlink_stream`, was `astral_stream`.
+- The Rust crate is `gistlink_native`, was `astral_compress`.
+
+No back-compatibility shims are provided: nothing had been published under the
+old names, so shims would be dead weight from the first release.
+
+### Changed
+- The README leads with what the software does rather than a backronym, and
+  the fictional framing is gone.
+
+## 1.1.0
+
+### Added
+- **Mission dictionaries** (`gistlink.dictionary`): trained zstd dictionaries
+  for short messages, which is where a general compressor has least context
+  and where GistLink is meant to operate. Measured on 100 short messages
+  compressed individually: 7,049 bytes with plain zstd -19, 4,578 with the
+  built-in text transform, 3,650 with a trained dictionary. `train-dict` on
+  the CLI, `--dict` on `pack-file` and `unpack-file`, and `dictionary=` /
+  `dictionaries=` on the Python API.
+- A compact three-byte container (container format 4) for the dictionary
+  transform. A zstd frame already records its decompressed size and the
+  dictionary it needs, so the ten-byte v3 header was pure duplication, and at
+  23% of a typical 33-byte compressed message it was not affordable.
+- `MissingDictionaryError` and a `missing_dictionary` key on decode results.
+  A receiver lacking a dictionary reports its id, which is actionable, rather
+  than failing as a generic decode error.
+
+- `GISTLINK_DICT` environment variable: name a dictionary once and every pack
+  and unpack uses it, instead of threading `--dict` through every call.
+
+### Changed
+- New `dict` extra: `pip install gistlink[dict]`.
+- **A dictionary can no longer make a payload larger.** Both the dictionary
+  and the built-in transform are produced and the smaller is sent. This
+  matters because a dictionary only helps on traffic resembling its training
+  set: measured, a mission-vocabulary dictionary made JSON status messages 8%
+  bigger and log lines 2% bigger. It is also why no built-in dictionary is
+  shipped, which had been the plan until it was measured.
+
+### Fixed
+- `compress(data, "TEXT")` raised `UnicodeDecodeError` on bytes that are not
+  valid UTF-8, turning a caller's wrong type hint into a lost message. The
+  abbreviation step is skipped and the data is entropy-coded instead.
+
 ## 1.0.0
 
 See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the release summary, compatibility
@@ -28,20 +92,27 @@ table and scope limits.
   counterpart.
 
 ### Added
+- `PersistentReplayGuard`: replay protection that survives a receiver
+  restart. The in-memory `ReplayGuard` reset to accepting everything when the
+  process bounced, which left the replay window open in exactly the situation
+  it was meant to close. The counter is written atomically and fsynced before
+  the command is accepted, so a crash can lose a command but never execute one
+  twice; an unreadable state file is an error rather than a silent reset; and
+  the CLI gained `--replay-state` and `--link-id`.
 - `docs/FORMAT.md`: the wire format specification, complete enough for an
   independent implementation.
 - `tests/test_vectors.py`: frozen wire-format vectors, with provenance noted
   per vector; the Reed-Solomon ones come from an independent encoder.
 - `tests/test_ccsds.py`: CCSDS conformance tests, consolidating the checks
   that used to live in the PHASE3/4/5 development scripts.
-- `astral` console script, packaging metadata, classifiers and project URLs.
+- `gistlink` console script, packaging metadata, classifiers and project URLs.
 
 ### Changed
 - Documentation reorganised: `docs/` holds the specification, integration
   guide and quick reference; `benchmarks/` holds the benchmark scripts.
 - Removed development artefacts superseded by the test suite:
   `PHASE3/4/5_VERIFICATION.py`, `verify_fixes.py`, `verify_core_fixes.py`,
-  `FIXES_VERIFICATION.py`, and the `README_MCKAY_ASTRAL.md` stub.
+  `FIXES_VERIFICATION.py`, and the `README_COMPRESS_ASTRAL.md` stub.
 - Version 1.0.0.
 
 ## 2026-09-14 (second pass)
@@ -91,14 +162,14 @@ table and scope limits.
 ## 2026-09-14
 
 ### Fixed (data integrity)
-- **McKay streams over 64 KiB no longer decode to corrupt output.** The
+- **compressed streams over 64 KiB no longer decode to corrupt output.** The
   original-length field was 16 bits, so TELEMETRY and BINARY payloads of 65535
   bytes or more came back truncated with no error (160,000 bytes in, 65,532
   out). The field is now 32 bits (format v3) and every reconstruction is
   length-checked. v2 streams still decode; v2 streams whose length was
   truncated when written now raise instead of returning junk.
 - **The Rust fast path is no longer selected against a stub.** The un-built
-  `astral_compress/` source directory imports as an empty namespace package,
+  `gistlink_native/` source directory imports as an empty namespace package,
   so `_RUST_AVAILABLE` was always True and every compression call took an
   exception-driven fallback. Availability now requires a real entry point.
 - **The CCSDS pseudo-randomizer generates the correct sequence.** It produced
@@ -109,10 +180,10 @@ table and scope limits.
   included, as CCSDS 131.0-B-5 requires. Only the ASM is left in the clear.
 - **TM frames declare their data field honestly.** Every frame previously
   claimed segment length ID `11` with First Header Pointer 0x7FF, telling
-  parsers that no packet ever starts. Opaque ASTRAL streams now use VCA
+  parsers that no packet ever starts. Opaque GistLink streams now use VCA
   framing (sync flag 1); the new `MODE_PACKET` carries real Space Packets with
   a correct First Header Pointer and idle-packet fill.
-- **`astral.cli wrap-sp` wraps its input.** It was discarding the file it read
+- **`gistlink.cli wrap-sp` wraps its input.** It was discarding the file it read
   and packing a fresh, near-empty message instead.
 - **Text payloads roundtrip exactly.** Capitalisation and whitespace were
   being discarded ("Hello world" decoded as "hello world"). Payload format v2
@@ -131,9 +202,9 @@ table and scope limits.
   silently truncated.
 
 ### Added
-- `codec.pack_mckay_message` / `unpack_mckay_stream`: McKay compression
-  carried over the fountain/atom layer with a replicated `MCKAY_GIST` atom.
-  This is the McKay + ASTRAL integration the documentation described; no code
+- `codec.pack_compressed_message` / `unpack_compressed_stream`: compression
+  carried over the fountain/atom layer with a replicated `COMPRESSED_GIST` atom.
+  This is the GistLink integration the documentation described; no code
   previously connected the two.
 - `codec.header_redundancy_for(loss_rate)` and a `header_redundancy` argument
   on every pack function, so gist survival can be sized for the link.
@@ -147,15 +218,15 @@ table and scope limits.
   which remain available under their own names.
 - `tmframe.frame_info`, `tmframe.split_space_packets`, `MODE_PACKET`.
 - `spacepacket.SpacePacketSequenceCounter.set`.
-- CLI: `pack-mckay`, `unpack-mckay`, `frame-tm --mode`, `simulate --seed`.
+- CLI: `pack-file`, `unpack-file`, `frame-tm --mode`, `simulate --seed`.
 - `tests/test_regressions.py`, 69 tests pinning every defect above.
 
 ### Changed
-- `mckay_vs_standard.py` rewritten: it previously printed literal format
+- `compression_benchmark.py` rewritten: it previously printed literal format
   specifiers (`print(".3f")`) instead of numbers, so its published figures were
   not reproducible. It now verifies every reconstruction before reporting a
   ratio. The same defect in the two Rust benchmarks is repaired.
-- `astral/mckay_usage_example.py` rewritten against the real API; it called
+- `gistlink/usage.py` rewritten against the real API; it called
   `get_compression_stats()` and `get_integration_stats()`, which do not exist,
   and crashed on the first example.
 - README rewritten so every performance and compliance claim matches measured
@@ -164,7 +235,7 @@ table and scope limits.
 - Verification and benchmark scripts force UTF-8 output, fixing
   `UnicodeEncodeError` crashes on a default Windows console.
 - flake8 configuration consolidated into `setup.cfg`; the exclusions that hid
-  `mckay_astral_integration.py` and the examples from linting are gone, and CI
+  `compress.py` and the examples from linting are gone, and CI
   lints tests and scripts too.
 - CI asserts the Rust extension is actually exercised and runs the standards
   verification scripts.
@@ -175,7 +246,7 @@ table and scope limits.
 
 ### Fixed
 - **Critical Bug Fixes for Deep-Space Reliability:**
-  - Extended McKay header to include entropy coder information for cross-compatibility between Rust and Python paths
+  - Extended container header to include entropy coder information for cross-compatibility between Rust and Python paths
   - Improved exception handling with warning-based fallbacks instead of silent data corruption
   - Changed quantization from Q16 to Q12 to prevent overflow in telemetry data
   - Fixed text decompression routing to properly use entropy-aware decompression paths
@@ -189,22 +260,22 @@ table and scope limits.
   - compress_text_demo.py
   - compress_video.py
   - compress_video_enhanced.py
-  - mckay_comprehensive_test.py
+  - compress_comprehensive_test.py
   - test_fountain_status.py
-  - test_mckay_fountain_corrected.py
-  - test_mckay_fountain_integration.py
-  - test_mckay_fountain_multitype.py
-  - test_mckay_gist_first.py
+  - test_compress_fountain_corrected.py
+  - test_compress_fountain_integration.py
+  - test_compress_fountain_multitype.py
+  - test_compression_gist_first.py
   - test_voice_optimization.py
 
 ### Changed
-- CLI cleanup in astral/cli.py:
+- CLI cleanup in gistlink/cli.py:
   - Removed no-op options that were parsed but not used:
     - pack-text: --refine
     - pack-text-with-dict: --refine
     - pack-cmd: --refine
     - pack-cmd-batch: --refine, --key-id, --counter, --contact
 - Removed dead contact parsing path in cmd_pack_cmd_batch.
-- Removed redundant local crc import in astral/container.py parse_atoms.
-- Updated README to remove references to deleted standalone scripts and point users to maintained astral.cli workflows.
+- Removed redundant local crc import in gistlink/container.py parse_atoms.
+- Updated README to remove references to deleted standalone scripts and point users to maintained gistlink.cli workflows.
 - Updated .flake8 excludes to reflect removed files.

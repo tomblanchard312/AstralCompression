@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark comparison between Rust and C implementations of ASTRAL compression algorithms.
+Benchmark comparison between Rust and C implementations of GistLink compression algorithms.
 """
 import sys
 
@@ -25,9 +25,9 @@ import os
 
 # Import Rust extension
 try:
-    import astral_compress as ac
+    import gistlink_native as ac
 
-    # Importability is not enough: the un-built `astral_compress/` source
+    # Importability is not enough: the un-built `gistlink_native/` source
     # directory imports as an empty namespace package.
     RUST_AVAILABLE = hasattr(ac, "compress_text")
 except ImportError:
@@ -365,7 +365,7 @@ def benchmark_text(data_size: int, iterations: int = 10) -> dict:
 
 
 def main():
-    print("ASTRAL Compression: Rust vs C Performance Comparison")
+    print("GistLink Compression: Rust vs C Performance Comparison")
     print("=" * 60)
 
     if not RUST_AVAILABLE:

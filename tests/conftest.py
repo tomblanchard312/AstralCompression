@@ -1,4 +1,4 @@
-"""Shared fixtures for the ASTRAL test suite."""
+"""Shared fixtures for the GistLink test suite."""
 
 import pytest
 

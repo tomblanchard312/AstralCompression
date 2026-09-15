@@ -1,8 +1,8 @@
-"""Tests for astral/codec.py - pack_message / unpack_stream."""
+"""Tests for gistlink/codec.py - pack_message / unpack_stream."""
 
 import random
 import pytest
-from astral.codec import (
+from gistlink.codec import (
     pack_cmd_batch,
     pack_cmd_message,
     pack_message,
@@ -142,29 +142,29 @@ class TestOptionalPhases:
     """Tests for Phase 3-5 modules. Skipped if modules are not yet present."""
 
     def test_space_packet_wrap_unwrap(self, detect_msg):
-        sp = pytest.importorskip("astral.spacepacket")
+        sp = pytest.importorskip("gistlink.spacepacket")
         counter = sp.SpacePacketSequenceCounter()
-        astral = pack_message(detect_msg, extra_fountain=3)
-        packet = sp.wrap(astral, "DETECT", counter)
+        gistlink = pack_message(detect_msg, extra_fountain=3)
+        packet = sp.wrap(gistlink, "DETECT", counter)
         parsed = sp.unwrap(packet)
-        assert parsed["astral_stream"] == astral
+        assert parsed["gistlink_stream"] == gistlink
         assert parsed["apid"] == sp.APID_MAP["DETECT"][0]
 
     def test_rs_fec_roundtrip(self, detect_msg):
         try:
-            from astral import rs_fec as rs
+            from gistlink import rs_fec as rs
         except ImportError:
             pytest.skip("requires the 'rs' extra (reedsolo)")
-        astral = pack_message(detect_msg, extra_fountain=3)
-        protected = rs.encode_stream(astral, e=16)
+        gistlink = pack_message(detect_msg, extra_fountain=3)
+        protected = rs.encode_stream(gistlink, e=16)
         recovered, _, n_drop = rs.decode_stream(protected, e=16)
-        assert recovered == astral
+        assert recovered == gistlink
         assert n_drop == 0
 
     def test_tm_frame_roundtrip(self, detect_msg):
-        tm = pytest.importorskip("astral.tmframe")
-        astral = pack_message(detect_msg, extra_fountain=3)
-        wire = tm.encode_frames(astral, scid=42, vcid=0)
+        tm = pytest.importorskip("gistlink.tmframe")
+        gistlink = pack_message(detect_msg, extra_fountain=3)
+        wire = tm.encode_frames(gistlink, scid=42, vcid=0)
         data, stats = tm.decode_frames(wire)
         assert stats["n_crc_errors"] == 0
-        assert data[: len(astral)] == astral
+        assert data[: len(gistlink)] == gistlink

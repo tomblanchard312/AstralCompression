@@ -1,4 +1,4 @@
-"""Tests for McKay v2 compression engine."""
+"""Tests for container v2 compression engine."""
 
 from __future__ import annotations
 
@@ -8,13 +8,14 @@ import warnings
 
 import pytest
 
-from astral.mckay_astral_integration import (
-    MCKAY_VERSION,
+from gistlink.compress import (
+    COMPRESS_VERSION,
+    MAGIC,
     TRANSFORM_BINARY_FLOAT,
     TRANSFORM_PASSTHROUGH,
     TRANSFORM_TELEMETRY,
     TRANSFORM_TEXT,
-    McKayCompressor,
+    Compressor,
     compress,
     decompress,
     stats,
@@ -24,8 +25,8 @@ from astral.mckay_astral_integration import (
 class TestHeader:
     def test_magic_and_version(self):
         c = compress(b"hello world test data for header")
-        assert c[0] == 0x4D and c[1] == 0x4B, "Magic must be 'MK'"
-        assert c[2] == MCKAY_VERSION
+        assert c[:2] == MAGIC == b"GL", "Magic must be 'GL'"
+        assert c[2] == COMPRESS_VERSION
 
     def test_original_length_stored(self):
         data = b"test " * 20
@@ -34,7 +35,7 @@ class TestHeader:
         assert stored == len(data)
 
     def test_unknown_transform_raises(self):
-        bad = bytearray(b"MK\x02\xff\x05\x00\x00\x00") + b"garbage"
+        bad = bytearray(b"GL\x02\xff\x05\x00\x00\x00") + b"garbage"
         with pytest.raises(ValueError, match="Unknown"):
             decompress(bytes(bad))
 
@@ -93,11 +94,11 @@ class TestCompressionQuality:
             for i in range(512)
         ]
         data = struct.pack(f">{len(vals)}f", *vals)
-        mckay_c = compress(data, "TELEMETRY", channels=1)
+        compress_c = compress(data, "TELEMETRY", channels=1)
         raw_lzma_size = len(lzma.compress(data, preset=9))
-        mckay_size = len(mckay_c) - 8
-        assert mckay_size <= raw_lzma_size * 1.1, (
-            f"McKay telemetry ({mckay_size}B) should not be worse than "
+        compressed_size = len(compress_c) - 8
+        assert compressed_size <= raw_lzma_size * 1.1, (
+            f"GistLink telemetry ({compressed_size}B) should not be worse than "
             f"raw LZMA ({raw_lzma_size}B)"
         )
 
@@ -168,16 +169,16 @@ class TestStats:
         assert s["original_size"] == len(data)
 
 
-class TestMcKayCompressorClass:
+class TestCompressorClass:
     def test_class_wraps_functions(self):
-        mc = McKayCompressor()
+        mc = Compressor()
         data = b"nominal link standing by"
         c = mc.compress(data)
         assert mc.decompress(c) == data
 
     def test_class_voice_bps_parameter(self):
-        mc1200 = McKayCompressor(voice_bps=1200)
-        mc2400 = McKayCompressor(voice_bps=2400)
+        mc1200 = Compressor(voice_bps=1200)
+        mc2400 = Compressor(voice_bps=2400)
         data = b"test " * 100
         c1 = mc1200.compress(data, "BINARY")
         c2 = mc2400.compress(data, "BINARY")
@@ -190,7 +191,7 @@ class TestRustIntegration:
 
     def test_rust_telemetry_compression_used(self):
         """Test that Rust telemetry compression is used without warnings."""
-        import astral.mckay_astral_integration as mai
+        import gistlink.compress as mai
 
         if not mai._RUST_AVAILABLE:
             pytest.skip("Rust extension not available")
@@ -215,7 +216,7 @@ class TestRustIntegration:
 
     def test_rust_binary_float_compression_used(self):
         """Test that Rust binary float compression is used without warnings."""
-        import astral.mckay_astral_integration as mai
+        import gistlink.compress as mai
 
         if not mai._RUST_AVAILABLE:
             pytest.skip("Rust extension not available")
@@ -239,7 +240,7 @@ class TestRustIntegration:
 
     def test_rust_compression_ratios(self):
         """Test that Rust compression provides good compression ratios."""
-        import astral.mckay_astral_integration as mai
+        import gistlink.compress as mai
 
         if not mai._RUST_AVAILABLE:
             pytest.skip("Rust extension not available")

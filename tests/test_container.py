@@ -1,7 +1,7 @@
-"""Tests for astral/container.py - 32-byte atom framing."""
+"""Tests for gistlink/container.py - 32-byte atom framing."""
 
 import pytest
-from astral.container import (
+from gistlink.container import (
     ATOM_SIZE,
     FOUNTAIN_PACKET,
     HEADER_GIST,

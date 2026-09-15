@@ -9,7 +9,7 @@ ATOM_SIZE = 32
 HEADER_GIST = 0
 FOUNTAIN_PACKET = 1
 DICT_UPDATE = 2
-MCKAY_GIST = 3  # McKay compression metadata (see codec.pack_mckay_message)
+COMPRESSED_GIST = 3  # compression metadata (see codec.pack_compressed_message)
 
 # Atom format version, carried in byte 2.
 #   1: original format

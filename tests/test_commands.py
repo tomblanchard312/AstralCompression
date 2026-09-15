@@ -1,10 +1,10 @@
-"""Tests for astral/commands.py — encoding and anti-replay."""
+"""Tests for gistlink/commands.py — encoding and anti-replay."""
 
 from __future__ import annotations
 
 import pytest
 
-from astral.commands import (
+from gistlink.commands import (
     CommandAuthError,
     decode_cmd,
     decode_cmd_batch,

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark comparison between Rust and Python implementations of ASTRAL compression algorithms.
+Benchmark comparison between Rust and Python implementations of GistLink compression algorithms.
 This demonstrates the performance improvements achieved by using Rust.
 """
 import sys
@@ -26,9 +26,9 @@ from typing import Tuple
 
 # Import Rust extension
 try:
-    import astral_compress as ac
+    import gistlink_native as ac
 
-    # Importability is not enough: the un-built `astral_compress/` source
+    # Importability is not enough: the un-built `gistlink_native/` source
     # directory imports as an empty namespace package.
     RUST_AVAILABLE = hasattr(ac, "compress_text")
 except ImportError:
@@ -365,7 +365,7 @@ def benchmark_text(data_size: int, iterations: int = 5) -> dict:
 
 
 def main():
-    print("ASTRAL Compression: Rust vs Python Performance Comparison")
+    print("GistLink Compression: Rust vs Python Performance Comparison")
     print("=" * 70)
     print("Demonstrating the landmark performance improvements achieved by Rust")
     print("=" * 70)

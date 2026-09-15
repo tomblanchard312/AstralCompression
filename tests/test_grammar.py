@@ -1,7 +1,7 @@
-"""Tests for astral/grammar.py - gist bits and payload encoding."""
+"""Tests for gistlink/grammar.py - gist bits and payload encoding."""
 
 import pytest
-from astral.grammar import (
+from gistlink.grammar import (
     DICT_TYPE,
     decode_payload,
     encode_payload,

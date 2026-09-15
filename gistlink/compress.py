@@ -1,4 +1,4 @@
-"""McKay domain-aware compression engine for deep-space links (format v3)."""
+"""Domain-aware compression engine for deep-space links (format v3)."""
 
 from __future__ import annotations
 
@@ -9,13 +9,23 @@ import struct
 import warnings
 import zlib
 
-MCKAY_VERSION: int = 3
+
+class MissingDictionaryError(ValueError):
+    """Raised when a payload names a mission dictionary the receiver lacks."""
+
+    def __init__(self, message: str, dict_id: int) -> None:
+        super().__init__(message)
+        self.dict_id = dict_id
+
+
+COMPRESS_VERSION: int = 3
 
 TRANSFORM_PASSTHROUGH = 0x00
 TRANSFORM_TEXT = 0x01
 TRANSFORM_TELEMETRY = 0x02
 TRANSFORM_VOICE_C2 = 0x03
 TRANSFORM_BINARY_FLOAT = 0x04
+TRANSFORM_ZSTD_DICT = 0x05  # zstd with a trained mission dictionary
 
 ENTROPY_LZMA = 0x00
 ENTROPY_ZLIB = 0x01
@@ -24,10 +34,17 @@ ENTROPY_NONE = 0xFF
 
 # v3 header: MAGIC(2) version(1) transform(1) orig_len(4, LE) channels(1) entropy(1)
 HEADER_SIZE = 10
+# v4 compact header: MAGIC(2) then (version << 4) | transform, and nothing
+# else. Used only where the payload is self-describing, which today means the
+# zstd dictionary transform: a zstd frame records both its decompressed size
+# and the dictionary it needs. A 10-byte header on a 33-byte message was 23%
+# of the stream, which is indefensible on a link this format exists to serve.
+HEADER_SIZE_V4 = 3
+COMPRESS_VERSION_COMPACT = 4
 # v2 header was identical except orig_len was 2 bytes, capping the recoverable
 # original length at 65535 and silently truncating anything larger.
 HEADER_SIZE_V2 = 8
-MAGIC = b"MK"
+MAGIC = b"GL"  # GistLink compressed container
 MAX_ORIGINAL_SIZE = 0xFFFFFFFF
 
 MISSION_ABBREVS: dict[str, str] = {
@@ -62,7 +79,7 @@ _ABBREV_TO_ID = {word: idx for idx, word in enumerate(_ABBREV_WORDS)}
 _ID_TO_ABBREV = {idx: word for word, idx in _ABBREV_TO_ID.items()}
 
 try:
-    import astral_compress as _ac
+    import gistlink_native as _ac
 
     # A namespace package (the un-built source directory) imports fine but
     # exposes nothing. Require at least one real entry point.
@@ -93,8 +110,8 @@ def _rust_has(name: str) -> bool:
     True only when the compiled extension really exposes ``name``.
 
     Importability is not enough: the repository root contains an
-    ``astral_compress/`` source directory with no ``__init__.py``, so a plain
-    ``import astral_compress`` succeeds as an empty namespace package whenever
+    ``gistlink_native/`` source directory with no ``__init__.py``, so a plain
+    ``import gistlink_native`` succeeds as an empty namespace package whenever
     the wheel has not been built. Checking for the attribute keeps the Rust
     fast path from being selected against a stub.
     """
@@ -124,9 +141,27 @@ def _detect_type(data: bytes) -> str:
     return "BINARY"
 
 
+ABBREV_MARKER = b""
+
+
+def _abbreviation_is_safe(data: bytes) -> bool:
+    """
+    Whether abbreviation coding can be reversed for this input.
+
+    The code is not injective: the decoder rewrites any `` followed by two
+    hex digits and a case digit into a word, so text that already contains
+    that sequence comes back with words substituted into it. Skipping the
+    transform for input containing the marker at all is the cheap, exact
+    guard, and the marker is a control character that ordinary mission text
+    does not carry. The Rust implementation shares the flaw, so this gates
+    both backends.
+    """
+    return ABBREV_MARKER not in data
+
+
 def _compress_text(data: bytes) -> tuple[int, int, bytes]:
     """Returns (transform_id, entropy_coder, payload_bytes)."""
-    if _rust_has("compress_text"):
+    if _rust_has("compress_text") and _abbreviation_is_safe(data):
         try:
             return TRANSFORM_TEXT, ENTROPY_ZSTD, _ac.compress_text(data)
         except Exception:
@@ -134,18 +169,36 @@ def _compress_text(data: bytes) -> tuple[int, int, bytes]:
                 "Rust text compression failed, falling back to Python", UserWarning
             )
 
-    abbr_bytes = _text_abbrev_encode(data)
-
+    # The transform id must record whether abbreviation coding was actually
+    # applied, because the decoder decides from it alone whether to run the
+    # abbreviation decoder. Labelling an un-abbreviated payload TRANSFORM_TEXT
+    # corrupts anything that merely looks abbreviated: text containing the
+    # literal marker sequence came back with words substituted into it, and
+    # compressible non-UTF-8 raised on decode. Candidates therefore carry the
+    # transform they belong to.
     candidates = [
-        (ENTROPY_ZLIB, zlib.compress(abbr_bytes, 9)),
-        (ENTROPY_LZMA, lzma.compress(abbr_bytes, preset=9)),
-        (ENTROPY_ZLIB, zlib.compress(data, 9)),
-        (ENTROPY_LZMA, lzma.compress(data, preset=9)),
+        (TRANSFORM_PASSTHROUGH, ENTROPY_ZLIB, zlib.compress(data, 9)),
+        (TRANSFORM_PASSTHROUGH, ENTROPY_LZMA, lzma.compress(data, preset=9)),
     ]
-    best_entropy, best = min(candidates, key=lambda x: len(x[1]))
+    try:
+        abbr_bytes = _text_abbrev_encode(data) if _abbreviation_is_safe(data) else None
+    except UnicodeDecodeError:
+        # Caller said TEXT but the bytes are not UTF-8. Abbreviation coding
+        # cannot apply, but there is no reason to fail: entropy-code it and
+        # carry on. Raising here would turn a caller's wrong type hint into a
+        # lost message.
+        abbr_bytes = None
+    if abbr_bytes is not None:
+        candidates.extend(
+            [
+                (TRANSFORM_TEXT, ENTROPY_ZLIB, zlib.compress(abbr_bytes, 9)),
+                (TRANSFORM_TEXT, ENTROPY_LZMA, lzma.compress(abbr_bytes, preset=9)),
+            ]
+        )
+    best_transform, best_entropy, best = min(candidates, key=lambda c: len(c[2]))
     if len(best) >= len(data):
         return TRANSFORM_PASSTHROUGH, ENTROPY_LZMA, lzma.compress(data, preset=9)
-    return TRANSFORM_TEXT, best_entropy, best
+    return best_transform, best_entropy, best
 
 
 def _apply_case(word: str, case_flag: int) -> str:
@@ -392,7 +445,7 @@ def _compress_voice(data: bytes, voice_bps: int) -> tuple[int, int, bytes]:
         return TRANSFORM_PASSTHROUGH, ENTROPY_LZMA, lzma.compress(data, preset=9)
 
     try:
-        from astral.voice import decode_bitstream_to_wav as _dec_wav
+        from gistlink.voice import decode_bitstream_to_wav as _dec_wav
         import os
         import tempfile
         import wave
@@ -527,14 +580,24 @@ def compress(
     data_type: str = "AUTO",
     voice_bps: int = 1200,
     channels: int = 0,
+    dictionary=None,
 ) -> bytes:
-    """Compress data using the McKay domain-aware pipeline (writes format v3)."""
+    """
+    Compress data using the the domain-aware pipeline (writes format v3).
+
+    ``dictionary`` is a :class:`gistlink.dictionary.MissionDictionary`. When
+    given, the payload is compressed with zstd against that dictionary, which
+    on short mission messages beats every transform here: a general codec has
+    no context inside a 90-byte report, and the dictionary supplies it. The
+    resulting frame records which dictionary it needs, so the receiver can
+    say so precisely if it is missing.
+    """
     if not isinstance(data, bytes):
         raise TypeError("data must be bytes")
 
     if len(data) > MAX_ORIGINAL_SIZE:
         raise ValueError(
-            f"input too large for McKay header: {len(data)} bytes "
+            f"input too large for container header: {len(data)} bytes "
             f"(max {MAX_ORIGINAL_SIZE})"
         )
 
@@ -542,7 +605,7 @@ def compress(
         payload = lzma.compress(b"", preset=9)
         return (
             MAGIC
-            + bytes([MCKAY_VERSION, TRANSFORM_PASSTHROUGH])
+            + bytes([COMPRESS_VERSION, TRANSFORM_PASSTHROUGH])
             + _pack_u32(0)
             + bytes([0, ENTROPY_LZMA])
             + payload
@@ -550,6 +613,15 @@ def compress(
 
     if data_type == "AUTO":
         data_type = _detect_type(data)
+
+    dict_stream = None
+    if dictionary is not None:
+        packed = dictionary.compress(data)
+        dict_stream = (
+            MAGIC
+            + bytes([(COMPRESS_VERSION_COMPACT << 4) | TRANSFORM_ZSTD_DICT])
+            + packed
+        )
 
     if data_type == "TEXT":
         tid, entropy_coder, payload = _compress_text(data)
@@ -580,9 +652,16 @@ def compress(
     if channels > 255:
         raise ValueError(f"channels must be 0-255, got {channels}")
 
+    if dict_stream is not None and len(dict_stream) < len(payload) + HEADER_SIZE:
+        # A dictionary is a bet that this payload resembles the traffic it was
+        # trained on. When the bet is wrong the dictionary makes things bigger,
+        # so both encodings are produced and the smaller one is sent. Supplying
+        # a dictionary can therefore never cost you bytes.
+        return dict_stream
+
     header = (
         MAGIC
-        + bytes([MCKAY_VERSION, tid])
+        + bytes([COMPRESS_VERSION, tid])
         + _pack_u32(len(data))
         + bytes([channels, entropy_coder])
     )
@@ -591,7 +670,7 @@ def compress(
 
 def _parse_header(data: bytes) -> tuple[int, int, int, int, int, bytes]:
     """
-    Parse a McKay header.
+    Parse a container header.
 
     Returns ``(version, transform_id, original_length, channels,
     entropy_coder, payload)``. Both the current v3 header (32-bit original
@@ -600,17 +679,25 @@ def _parse_header(data: bytes) -> tuple[int, int, int, int, int, bytes]:
     """
     if not isinstance(data, bytes):
         raise TypeError("data must be bytes")
-    if len(data) < HEADER_SIZE_V2:
-        raise ValueError(f"Too short for McKay header: {len(data)} bytes")
+    if len(data) < HEADER_SIZE_V4:
+        raise ValueError(f"Too short for container header: {len(data)} bytes")
     if data[:2] != MAGIC:
-        raise ValueError(f"Bad magic: {data[:2]!r} (expected b'MK')")
+        raise ValueError(f"Bad magic: {data[:2]!r} (expected b'GL')")
+    if (data[2] >> 4) != COMPRESS_VERSION_COMPACT and len(data) < HEADER_SIZE_V2:
+        raise ValueError(f"Too short for container header: {len(data)} bytes")
+
+    version = data[2] >> 4
+    if version == COMPRESS_VERSION_COMPACT:
+        tid = data[2] & 0x0F
+        # Length and dictionary id both live in the payload itself.
+        return version, tid, 0, 0, ENTROPY_ZSTD, data[HEADER_SIZE_V4:]
 
     version = data[2]
     tid = data[3]
 
     if version >= 3:
         if len(data) < HEADER_SIZE:
-            raise ValueError(f"Too short for McKay v3 header: {len(data)} bytes")
+            raise ValueError(f"Too short for container v3 header: {len(data)} bytes")
         orig_len = _unpack_u32(data[4:8])
         channels = data[8]
         entropy_coder = data[9]
@@ -624,9 +711,30 @@ def _parse_header(data: bytes) -> tuple[int, int, int, int, int, bytes]:
     return version, tid, orig_len, channels, entropy_coder, payload
 
 
-def decompress(data: bytes) -> bytes:
-    """Decompress a McKay compressed stream (v2 or v3)."""
+def decompress(data: bytes, dictionaries=None) -> bytes:
+    """
+    Decompress a compressed compressed stream (v2 or v3).
+
+    ``dictionaries`` is a :class:`gistlink.dictionary.DictionaryRegistry`,
+    needed only for payloads compressed against a mission dictionary. A
+    payload that names a dictionary the registry lacks raises with the id, so
+    the operator knows which artifact to fetch.
+    """
     _version, tid, orig_len, channels, entropy_coder, payload = _parse_header(data)
+
+    if tid == TRANSFORM_ZSTD_DICT:
+        from .dictionary import DictionaryRegistry, frame_dict_id
+
+        dict_id = frame_dict_id(payload)
+        registry = dictionaries or DictionaryRegistry()
+        try:
+            dictionary = registry.require(dict_id)
+        except KeyError as exc:
+            raise MissingDictionaryError(str(exc).strip("'"), dict_id) from exc
+        out = dictionary.decompress(payload)
+        if orig_len:  # v3-style header carrying an explicit length
+            return _verify_length(out, orig_len, _version, "ZSTD_DICT")
+        return out
 
     # Select decompressor based on entropy coder
     def _entropy_decompress(payload: bytes) -> bytes:
@@ -717,7 +825,7 @@ def decompress(data: bytes) -> bytes:
         out = _decompress_binary_float(payload, orig_len, entropy_coder)
         return _verify_length(out, orig_len, _version, "BINARY_FLOAT")
 
-    raise ValueError(f"Unknown McKay transform ID: 0x{tid:02X}")
+    raise ValueError(f"Unknown transform ID: 0x{tid:02X}")
 
 
 def _verify_length(out: bytes, orig_len: int, version: int, what: str) -> bytes:
@@ -731,7 +839,7 @@ def _verify_length(out: bytes, orig_len: int, version: int, what: str) -> bytes:
     if version < 3:
         if orig_len >= 0xFFFF:
             raise ValueError(
-                f"{what} stream is legacy McKay v2 and its original length was "
+                f"{what} stream is legacy container v2 and its original length was "
                 f"truncated to 16 bits when written; the exact size cannot be "
                 f"recovered. Re-compress the source with this version."
             )
@@ -745,19 +853,26 @@ def _verify_length(out: bytes, orig_len: int, version: int, what: str) -> bytes:
 
 
 def stats(compressed: bytes) -> dict:
-    """Return compression statistics for a McKay stream (v2 or v3)."""
+    """Return compression statistics for a compressed stream (v2 or v3)."""
     try:
         _version, tid, orig_len, _channels, _entropy, payload = _parse_header(
             compressed
         )
     except (TypeError, ValueError) as exc:
         return {"error": str(exc)}
+
+    if tid == TRANSFORM_ZSTD_DICT and not orig_len:
+        # The compact header stores no length; the zstd frame carries it.
+        from .dictionary import frame_content_size
+
+        orig_len = frame_content_size(payload)
     names = {
         TRANSFORM_PASSTHROUGH: "passthrough",
         TRANSFORM_TEXT: "text",
         TRANSFORM_TELEMETRY: "telemetry",
         TRANSFORM_VOICE_C2: "voice_codec2",
         TRANSFORM_BINARY_FLOAT: "binary_float",
+        TRANSFORM_ZSTD_DICT: "zstd_dict",
     }
     # Report the size of the whole stream, header included: that is what has
     # to be transmitted, so it is what the ratio should be measured against.
@@ -774,7 +889,7 @@ def stats(compressed: bytes) -> dict:
     }
 
 
-class McKayCompressor:
+class Compressor:
     def __init__(self, voice_bps: int = 1200) -> None:
         self.voice_bps = voice_bps
 
@@ -788,19 +903,19 @@ class McKayCompressor:
         return stats(compressed)
 
 
-McKayASTRALCompressor = McKayCompressor
+Compressor = Compressor
 
 
-class McKayASTRALIntegration:
+class CompressionPipeline:
     def __init__(self, voice_bps: int = 1200) -> None:
-        self.mckay_compressor = McKayCompressor(voice_bps=voice_bps)
+        self.compressor = Compressor(voice_bps=voice_bps)
 
     def compress_and_encode(
         self, data, data_type: str = "AUTO", extra_fountain: int = 0
     ):
         _ = extra_fountain
         payload = data if isinstance(data, bytes) else str(data).encode("utf-8")
-        return self.mckay_compressor.compress(payload, data_type)
+        return self.compressor.compress(payload, data_type)
 
     def decompress_and_decode(self, data: bytes) -> bytes:
-        return self.mckay_compressor.decompress(data)
+        return self.compressor.decompress(data)

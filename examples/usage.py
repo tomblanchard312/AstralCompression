@@ -1,29 +1,33 @@
 #!/usr/bin/env python3
 """
-McKay + ASTRAL usage examples.
+GistLink usage examples.
 
 Runnable demonstrations of the full path: domain-aware compression, a
 replicated metadata gist, and a fountain-coded body that survives packet loss.
 
-    python -m astral.mckay_usage_example
+    python examples/usage.py
 """
 
 import math
+import os
 import random
 import struct
 import sys
 
+# Run from a checkout without installing.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from astral import mckay_astral_integration as mckay
-from astral.codec import (
+from gistlink import compress as compress
+from gistlink.codec import (
     header_redundancy_for,
-    pack_mckay_message,
-    unpack_mckay_stream,
+    pack_compressed_message,
+    unpack_compressed_stream,
     unpack_stream,
 )
-from astral.container import HEADER_GIST, MCKAY_GIST
+from gistlink.container import HEADER_GIST, COMPRESSED_GIST
 
 
 def _report(label: str, source: bytes, stream: bytes) -> None:
@@ -44,11 +48,11 @@ def example_mission_report() -> bytes:
     ) * 40
     source = report.encode("utf-8")
 
-    stream = pack_mckay_message(source, "TEXT", extra_fountain=15)
-    _report("McKay + fountain", source, stream)
+    stream = pack_compressed_message(source, "TEXT", extra_fountain=15)
+    _report("compression + fountain", source, stream)
 
-    result = unpack_mckay_stream(stream)
-    print(f"    gist        : {result['mckay']}")
+    result = unpack_compressed_stream(stream)
+    print(f"    gist        : {result['compression']}")
     print(f"    recovered   : {'exact' if result['data'] == source else 'MISMATCH'}")
     return stream
 
@@ -64,10 +68,10 @@ def example_telemetry() -> bytes:
             values.append(math.sin(t / 40.0 + ch) * 10.0 + ch)
     source = struct.pack(f">{len(values)}f", *values)
 
-    stream = pack_mckay_message(source, "TELEMETRY", channels=channels)
-    _report("McKay + fountain", source, stream)
+    stream = pack_compressed_message(source, "TELEMETRY", channels=channels)
+    _report("compression + fountain", source, stream)
 
-    result = unpack_mckay_stream(stream)
+    result = unpack_compressed_stream(stream)
     restored = struct.unpack(f">{len(values)}f", result["data"])
     max_err = max(abs(a - b) for a, b in zip(values, restored))
     print(f"    quantiser   : lossy by design, max error {max_err:.2e}")
@@ -78,9 +82,9 @@ def example_binary() -> bytes:
     """Binary float data: byte reordering before entropy coding."""
     print("\n=== Scientific binary data (BINARY) ===")
     source = struct.pack(f">{5000}f", *[i * 0.25 for i in range(5000)])
-    stream = pack_mckay_message(source, "BINARY")
-    _report("McKay + fountain", source, stream)
-    result = unpack_mckay_stream(stream)
+    stream = pack_compressed_message(source, "BINARY")
+    _report("compression + fountain", source, stream)
+    result = unpack_compressed_stream(stream)
     print(f"    recovered   : {'exact' if result['data'] == source else 'MISMATCH'}")
     return stream
 
@@ -92,7 +96,7 @@ def example_gist_under_loss() -> None:
 
     # Size the header replication for the loss rate the link actually sees.
     loss = 0.8
-    stream = pack_mckay_message(
+    stream = pack_compressed_message(
         source,
         "TEXT",
         extra_fountain=20,
@@ -109,7 +113,7 @@ def example_gist_under_loss() -> None:
         result = unpack_stream(kept)
         if result.get("data") == source:
             full += 1
-        elif result.get("mckay"):
+        elif result.get("compression"):
             gist_only += 1
         else:
             nothing += 1
@@ -121,23 +125,23 @@ def example_gist_under_loss() -> None:
 
     # Show what the gist alone tells you when no fountain packet arrives.
     gist_atoms = b"".join(
-        a for a in atoms if a[9] in (HEADER_GIST, MCKAY_GIST)
+        a for a in atoms if a[9] in (HEADER_GIST, COMPRESSED_GIST)
     )
     result = unpack_stream(gist_atoms)
-    print(f"  gist without any fountain packet: {result['mckay']}")
+    print(f"  gist without any fountain packet: {result['compression']}")
 
 
 def example_compression_only() -> None:
     """Compression on its own, without the transmission layer."""
     print("\n=== Compressor used directly ===")
     source = ("satellite telemetry nominal battery temperature " * 100).encode()
-    compressed = mckay.compress(source, "TEXT")
-    print(f"  stats: {mckay.stats(compressed)}")
-    assert mckay.decompress(compressed) == source
+    compressed = compress.compress(source, "TEXT")
+    print(f"  stats: {compress.stats(compressed)}")
+    assert compress.decompress(compressed) == source
 
 
 def main() -> int:
-    print("McKay + ASTRAL deep space compression")
+    print("GistLink deep space compression")
     print("=" * 60)
     try:
         example_mission_report()

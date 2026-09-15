@@ -20,13 +20,13 @@ CCSDS channel coding (``encode_codeblock`` / ``decode_codeblock``)
     Interleave depth 5 over a 1115-byte frame yields the usual 1275-byte
     codeblock.
 
-ASTRAL atom protection (``encode_stream`` / ``decode_stream``)
+GistLink atom protection (``encode_stream`` / ``decode_stream``)
     A shorter RS code applied per 32-byte atom, so that a corrupted atom can be
     repaired instead of being discarded by its CRC. These are RS(48,32) and
     RS(64,32): the same field and generator, but not a CCSDS codeblock.
 
 Requires the optional ``reedsolo`` dependency: ``pip install
-astral-compression[rs]``.
+gistlink[rs]``.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ try:
 except ImportError as _exc:  # pragma: no cover - exercised by the extras test
     raise ImportError(
         "Reed-Solomon support requires the 'reedsolo' package. "
-        "Install it with: pip install astral-compression[rs]",
+        "Install it with: pip install gistlink[rs]",
         name="reedsolo",
     ) from _exc
 
@@ -107,7 +107,7 @@ _RS_CCSDS = {k: reedsolo.RSCodec(nsym=nsym, **_RS_PARAMS) for k, nsym in CCSDS_K
 
 def encode_stream(atom_stream: bytes, e: int = 16) -> bytes:
     """
-    Protect each 32-byte ASTRAL atom with its own RS codeword.
+    Protect each 32-byte GistLink atom with its own RS codeword.
 
     ``e=16`` gives RS(64,32) and corrects up to 16 corrupt bytes per atom;
     ``e=8`` gives RS(48,32) and corrects up to 8.

@@ -7,9 +7,9 @@
   "reportArgumentType": true,
   "reportAttributeAccessIssue": true,
   "exclude": [
-    "astral/mckay_astral_integration.py",
-    "astral/mckay_usage_example.py",
-    "test_mckay_*.py",
-    "mckay_comprehensive_test.py"
+    "gistlink/compress.py",
+    "gistlink/usage.py",
+    "test_compress_*.py",
+    "compress_comprehensive_test.py"
   ]
 }

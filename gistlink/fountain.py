@@ -159,28 +159,115 @@ def lt_encode_blocks(blocks, seed, num_packets, c=0.1, delta=0.05):
     # better for larger ones.
     block_ints = [int.from_bytes(b, "big") for b in blocks]
 
-    packets = []
-    for _ in range(num_packets):
-        # Generate deterministic packet seed
+    def draw():
+        """One packet: its seed, degree, index set and index bitmask."""
         packet_seed = rnd.getrandbits(32)
         packet_rng = _Xorshift32(packet_seed)
-
-        # Sample degree
         degree = _sample_degree(dist, packet_rng)
         degree = max(1, min(degree, K))
-
-        # Use sampling without replacement for better distribution
         indices = packet_rng.sample_indices(K, degree)
+        mask = 0
+        for idx in indices:
+            mask |= 1 << idx
+        return packet_seed, degree, indices, mask
 
+    drawn = [draw() for _ in range(num_packets)]
+
+    # Guarantee the emitted set is solvable.
+    #
+    # Left to chance, a randomly drawn set can be linearly dependent even with
+    # every block covered and no packet lost: measured at K=3 with 13 packets,
+    # 0.5% of seeds produced a set that cannot be decoded on a perfect link.
+    # For a command message that is a real failure, not a rounding error.
+    #
+    # The decoder derives each packet's indices from that packet's own seed, so
+    # the encoder is free to choose which seeds it emits. Redundant packets are
+    # therefore replaced with ones that raise the rank, which costs nothing on
+    # the wire and makes "all packets arrived" mean "decodes".
+    if K <= RANK_GUARANTEE_MAX_K:
+        drawn = _ensure_full_rank(drawn, K, draw)
+
+    packets = []
+    for packet_seed, degree, indices, _mask in drawn:
         acc = 0
         for idx in indices:
             acc ^= block_ints[idx]
-
-        packets.append(
-            (packet_seed, degree, acc.to_bytes(block_size, "big"))
-        )
+        packets.append((packet_seed, degree, acc.to_bytes(block_size, "big")))
 
     return packets
+
+
+MAX_RANK_REPAIR_DRAWS = 4096
+
+# Above this many source blocks the guarantee is skipped. Measured
+# rank-deficiency rates for an unrepaired draw at the default redundancy:
+#
+#     K=3   1.00%     K=20  0.25%     K=160  none observed
+#     K=5   0.50%     K=40  0.25%     K=320  none observed
+#     K=10  0.50%     K=80  none observed
+#
+# The risk lives at small K, where the check costs microseconds; the check
+# costs O(M*K) and reaches 142 ms at K=2000, where the risk is unmeasurable.
+# 512 leaves a wide margin over the last K at which any deficiency was seen.
+RANK_GUARANTEE_MAX_K = 512
+
+
+def _independent_and_dependent(drawn, K):
+    """
+    Split packets by whether each raises the rank of the set, over GF(2).
+
+    Index sets are bitmasks, so elimination is a handful of integer XORs per
+    packet rather than anything proportional to the payload.
+    """
+    pivots: dict = {}
+    independent, dependent = [], []
+    for item in drawn:
+        residual = item[3]
+        while residual:
+            top = residual.bit_length() - 1
+            if top not in pivots:
+                pivots[top] = residual
+                independent.append(item)
+                break
+            residual ^= pivots[top]
+        else:
+            dependent.append(item)
+    return independent, dependent, pivots
+
+
+def _ensure_full_rank(drawn, K, draw):
+    """
+    Replace redundant packets until the set spans all K source blocks.
+
+    Returns the packets in their original order where possible. If the rank
+    cannot be completed within a bounded number of draws the set is returned
+    as it stands: a best effort beats refusing to transmit.
+    """
+    independent, dependent, pivots = _independent_and_dependent(drawn, K)
+    if len(pivots) >= K or not dependent:
+        return drawn
+
+    replacements = {}
+    attempts = 0
+    spare = list(dependent)
+    while len(pivots) < K and spare and attempts < MAX_RANK_REPAIR_DRAWS:
+        attempts += 1
+        candidate = draw()
+        residual = candidate[3]
+        while residual:
+            top = residual.bit_length() - 1
+            if top not in pivots:
+                pivots[top] = residual
+                victim = spare.pop()
+                replacements[id(victim)] = candidate
+                break
+            residual ^= pivots[top]
+        else:
+            continue
+
+    if not replacements:
+        return drawn
+    return [replacements.get(id(item), item) for item in drawn]
 
 
 def _gaussian_eliminate(equations, solved: dict, symbol_size: int) -> None:

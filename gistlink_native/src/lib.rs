@@ -363,7 +363,7 @@ fn decompress_text(py: Python, data: &[u8]) -> PyResult<Py<PyBytes>> {
 
 /// Python module definition
 #[pymodule]
-fn astral_compress(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn gistlink_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(compress_telemetry, m)?)?;
     m.add_function(wrap_pyfunction!(decompress_telemetry, m)?)?;
     m.add_function(wrap_pyfunction!(compress_binary_float, m)?)?;

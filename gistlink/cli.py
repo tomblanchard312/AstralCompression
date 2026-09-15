@@ -4,8 +4,8 @@ import sys
 from .codec import (
     header_redundancy_for,
     pack_message,
-    pack_mckay_message,
-    unpack_mckay_stream,
+    pack_compressed_message,
+    unpack_compressed_stream,
     unpack_stream,
     pack_text_message,
     pack_voice_message,
@@ -19,6 +19,13 @@ from .spacepacket import (
     SpacePacketSequenceCounter,
     APID_MAP,
     wrap as sp_wrap,
+)
+from .commands import PersistentReplayGuard
+from .dictionary import (
+    DictionaryRegistry,
+    MissionDictionary,
+    configured_paths,
+    train as train_dict,
 )
 from .voice import decode_bitstream_to_wav
 
@@ -84,7 +91,16 @@ def cmd_unpack(args):
     try:
         stream = read_bin(args.input)
         key = bytes.fromhex(args.key) if getattr(args, "key", None) else None
-        result = unpack_stream(stream, key=key)
+        guard = None
+        if getattr(args, "replay_state", None):
+            guard = PersistentReplayGuard(args.replay_state, args.link_id)
+        elif key is not None:
+            print(
+                "WARNING: no --replay-state given, so a command already "
+                "received will be accepted again after a restart.",
+                file=sys.stderr,
+            )
+        result = unpack_stream(stream, key=key, replay_guard=guard)
         if result.get("command_authenticated") is False and key is None:
             print(
                 "WARNING: this is a command and no --key was given, so it is "
@@ -225,16 +241,58 @@ def cmd_pack_cmd_batch(args):
     return 0
 
 
-def cmd_pack_mckay(args):
-    """Compress a file with McKay and send it as gist-first atoms."""
+def cmd_train_dict(args):
+    """Train a mission dictionary from sample messages."""
+    try:
+        import glob as _glob
+
+        paths = []
+        for pattern in args.samples:
+            matched = sorted(_glob.glob(pattern))
+            paths.extend(matched if matched else [pattern])
+        samples = [read_bin(p) for p in paths]
+        dictionary = train_dict(samples, size=args.size, name=args.output)
+        dictionary.save(args.output)
+        print(
+            f"Trained on {len(samples)} samples "
+            f"({sum(len(s) for s in samples):,} bytes) -> {args.output}"
+        )
+        print(f"  dictionary id {dictionary.dict_id}, {len(dictionary.to_bytes()):,} bytes")
+        print("  Ship this file to both ends; a receiver without it cannot decode.")
+    except Exception as e:
+        print(f"Error training dictionary: {e}")
+        return 1
+    return 0
+
+
+def _load_dictionaries(paths):
+    """Dictionaries from --dict, falling back to the GISTLINK_DICT environment."""
+    registry = DictionaryRegistry()
+    for path in list(paths or []) or configured_paths():
+        registry.load(path)
+    return registry if len(registry) else None
+
+
+def _sending_dictionary(path):
+    """The dictionary to compress with: --dict, else the first configured."""
+    if path:
+        return MissionDictionary.load(path)
+    configured = configured_paths()
+    return MissionDictionary.load(configured[0]) if configured else None
+
+
+def cmd_pack_file(args):
+    """Compress a file with and send it as gist-first atoms."""
     try:
         data = read_bin(args.input)
         hr = args.header_redundancy
         if hr is None and args.survive_loss is not None:
             hr = header_redundancy_for(args.survive_loss)
-        blob = pack_mckay_message(
+        dictionary = _sending_dictionary(args.dict)
+        blob = pack_compressed_message(
             data,
             data_type=args.type,
+            dictionary=dictionary,
             extra_fountain=args.extra,
             channels=args.channels,
             min_redundancy=args.min_redundancy,
@@ -245,19 +303,21 @@ def cmd_pack_mckay(args):
         ratio = len(data) / len(blob) if blob else 0.0
         print(
             f"Wrote {len(blob)} bytes to {args.output} "
-            f"({len(blob)//32} atoms). TYPE=MCKAY/{args.type} "
+            f"({len(blob)//32} atoms). TYPE=COMPRESS/{args.type} "
             f"source={len(data)} bytes, wire ratio={ratio:.2f}x"
         )
     except Exception as e:
-        print(f"Error packing McKay message: {e}")
+        print(f"Error packing compressed message: {e}")
         return 1
     return 0
 
 
-def cmd_unpack_mckay(args):
-    """Decode a McKay atom stream, writing the recovered bytes out."""
+def cmd_unpack_file(args):
+    """Decode a compressed atom stream, writing the recovered bytes out."""
     try:
-        result = unpack_mckay_stream(read_bin(args.input))
+        result = unpack_compressed_stream(
+            read_bin(args.input), dictionaries=_load_dictionaries(args.dict)
+        )
         data = result.get("data")
         if data is not None and args.output:
             write_bin(args.output, data)
@@ -266,14 +326,14 @@ def cmd_unpack_mckay(args):
         summary["recovered_bytes"] = len(data) if data is not None else 0
         print_json(summary)
     except Exception as e:
-        print(f"Error unpacking McKay stream: {e}")
+        print(f"Error unpacking compressed stream: {e}")
         return 1
     return 0
 
 
 def cmd_wrap_sp(args):
     try:
-        astral_stream = read_bin(args.input)
+        gistlink_stream = read_bin(args.input)
         if args.msg_type not in APID_MAP:
             valid_types = list(APID_MAP.keys())
             print(
@@ -287,10 +347,10 @@ def cmd_wrap_sp(args):
             counter.set(apid, args.seq_count)
         # Wrap the stream that was read, rather than packing a new message:
         # this subcommand is a framing step, not an encoder.
-        packet = sp_wrap(astral_stream, args.msg_type, counter)
+        packet = sp_wrap(gistlink_stream, args.msg_type, counter)
         write_bin(args.output, packet)
         print(
-            f"Wrapped {len(astral_stream)} bytes into Space Packet "
+            f"Wrapped {len(gistlink_stream)} bytes into Space Packet "
             f"({len(packet)} bytes total)."
         )
     except Exception as e:
@@ -314,7 +374,7 @@ def cmd_unwrap_sp(args):
 
 
 def cmd_encode_rs(args):
-    """Apply RS FEC to an ASTRAL binary file."""
+    """Apply RS FEC to an GistLink binary file."""
     try:
         from .rs_fec import encode_stream, CODEWORD_SIZE
 
@@ -323,7 +383,7 @@ def cmd_encode_rs(args):
             print(
                 f"Error: input length {len(atom_stream)} "
                 "is not a multiple of 32. "
-                "Is this a valid ASTRAL stream?"
+                "Is this a valid GistLink stream?"
             )
             return 1
         rs_stream = encode_stream(atom_stream, e=args.e)
@@ -365,7 +425,7 @@ def cmd_decode_rs(args):
 
 
 def cmd_frame_tm(args):
-    """Segment an ASTRAL binary into CCSDS TM Transfer Frames."""
+    """Segment an GistLink binary into CCSDS TM Transfer Frames."""
     try:
         from .tmframe import TmFrameCounter, WIRE_FRAME_SIZE, encode_frames
 
@@ -392,7 +452,7 @@ def cmd_frame_tm(args):
 
 
 def cmd_deframe_tm(args):
-    """Decode CCSDS TM Transfer Frames and recover the ASTRAL stream."""
+    """Decode CCSDS TM Transfer Frames and recover the GistLink stream."""
     try:
         wire = read_bin(args.input)
         result = unpack_frames_tm(wire, randomise=not args.no_randomise)
@@ -405,7 +465,7 @@ def cmd_deframe_tm(args):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="astral")
+    p = argparse.ArgumentParser(prog="gistlink")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     p_pack = sub.add_parser("pack", help="pack JSON message to atomized binary")
@@ -428,6 +488,20 @@ def main(argv=None):
         default=None,
         help="hex HMAC key; required to authenticate a CMD or CMD_BATCH",
     )
+    p_unpack.add_argument(
+        "--replay-state",
+        default=None,
+        metavar="PATH",
+        help=(
+            "file holding the last accepted command counter; required for "
+            "replay protection to survive a restart"
+        ),
+    )
+    p_unpack.add_argument(
+        "--link-id",
+        default="default",
+        help="which uplink inside the replay state file (default: default)",
+    )
     p_unpack.set_defaults(func=cmd_unpack)
 
     p_sim = sub.add_parser("simulate", help="simulate random atom loss")
@@ -447,26 +521,48 @@ def main(argv=None):
     )
     p_sim.set_defaults(func=cmd_simulate)
 
-    p_pack_mckay = sub.add_parser(
-        "pack-mckay",
-        help="compress a file with McKay and pack it as gist-first atoms",
+    p_train = sub.add_parser(
+        "train-dict",
+        help="train a mission dictionary from sample messages",
     )
-    p_pack_mckay.add_argument("input", help="file to compress and transmit")
-    p_pack_mckay.add_argument("output", help="ASTRAL atom stream output")
-    p_pack_mckay.add_argument(
+    p_train.add_argument(
+        "samples", nargs="+", help="sample message files (globs accepted)"
+    )
+    p_train.add_argument("-o", "--output", required=True, help="dictionary file")
+    p_train.add_argument(
+        "--size", type=int, default=16384, help="dictionary size in bytes"
+    )
+    p_train.set_defaults(func=cmd_train_dict)
+
+    p_pack_file = sub.add_parser(
+        "pack-file",
+        help="compress a file and pack it as gist-first atoms",
+    )
+    p_pack_file.add_argument("input", help="file to compress and transmit")
+    p_pack_file.add_argument("output", help="GistLink atom stream output")
+    p_pack_file.add_argument(
         "--type",
         default="AUTO",
         choices=["AUTO", "TEXT", "TELEMETRY", "VOICE", "BINARY", "IMAGE"],
         help="data type hint for the compressor (default: AUTO)",
     )
-    p_pack_mckay.add_argument("--extra", type=int, default=0)
-    p_pack_mckay.add_argument(
+    p_pack_file.add_argument("--extra", type=int, default=0)
+    p_pack_file.add_argument(
+        "--dict",
+        default=None,
+        metavar="PATH",
+        help=(
+            "mission dictionary to compress against (see train-dict); "
+            "defaults to $GISTLINK_DICT"
+        ),
+    )
+    p_pack_file.add_argument(
         "--channels",
         type=int,
         default=0,
         help="TELEMETRY channel count (0 = auto-detect)",
     )
-    p_pack_mckay.add_argument(
+    p_pack_file.add_argument(
         "--redundancy",
         type=float,
         default=1.0,
@@ -475,7 +571,7 @@ def main(argv=None):
             "compressed payload, 0.3 sends 30%% extra"
         ),
     )
-    p_pack_mckay.add_argument(
+    p_pack_file.add_argument(
         "--min-redundancy",
         type=int,
         default=10,
@@ -485,31 +581,38 @@ def main(argv=None):
             "compressed payload"
         ),
     )
-    p_pack_mckay.add_argument(
+    p_pack_file.add_argument(
         "--header-redundancy",
         type=int,
         default=None,
         help="copies of the gist/header atoms (default: scaled with size)",
     )
-    p_pack_mckay.add_argument(
+    p_pack_file.add_argument(
         "--survive-loss",
         type=float,
         default=None,
         help="pick header redundancy that keeps the gist at this loss rate",
     )
-    p_pack_mckay.set_defaults(func=cmd_pack_mckay)
+    p_pack_file.set_defaults(func=cmd_pack_file)
 
-    p_unpack_mckay = sub.add_parser(
-        "unpack-mckay", help="decode a McKay atom stream back to the source file"
+    p_unpack_file = sub.add_parser(
+        "unpack-file", help="decode a compressed atom stream back to the source file"
     )
-    p_unpack_mckay.add_argument("input")
-    p_unpack_mckay.add_argument("output", nargs="?", default=None)
-    p_unpack_mckay.set_defaults(func=cmd_unpack_mckay)
+    p_unpack_file.add_argument("input")
+    p_unpack_file.add_argument("output", nargs="?", default=None)
+    p_unpack_file.add_argument(
+        "--dict",
+        action="append",
+        default=None,
+        metavar="PATH",
+        help="mission dictionary to decode with; repeatable, defaults to $GISTLINK_DICT",
+    )
+    p_unpack_file.set_defaults(func=cmd_unpack_file)
 
     p_wrap_sp = sub.add_parser(
-        "wrap-sp", help="wrap ASTRAL binary in CCSDS Space Packet"
+        "wrap-sp", help="wrap GistLink binary in CCSDS Space Packet"
     )
-    p_wrap_sp.add_argument("input", help="ASTRAL binary stream")
+    p_wrap_sp.add_argument("input", help="GistLink binary stream")
     p_wrap_sp.add_argument("output", help="Space Packet output file")
     p_wrap_sp.add_argument(
         "--msg-type",
@@ -525,16 +628,16 @@ def main(argv=None):
     p_wrap_sp.set_defaults(func=cmd_wrap_sp)
 
     p_unwrap_sp = sub.add_parser(
-        "unwrap-sp", help="unwrap CCSDS Space Packet to ASTRAL"
+        "unwrap-sp", help="unwrap CCSDS Space Packet to GistLink"
     )
     p_unwrap_sp.add_argument("input", help="Space Packet input file")
     p_unwrap_sp.set_defaults(func=cmd_unwrap_sp)
 
     p_encode_rs = sub.add_parser(
         "encode-rs",
-        help="protect an ASTRAL binary with CCSDS Reed-Solomon FEC",
+        help="protect an GistLink binary with CCSDS Reed-Solomon FEC",
     )
-    p_encode_rs.add_argument("input", help="ASTRAL binary file")
+    p_encode_rs.add_argument("input", help="GistLink binary file")
     p_encode_rs.add_argument("output", help="RS-protected output file")
     p_encode_rs.add_argument(
         "--e",
@@ -550,7 +653,7 @@ def main(argv=None):
         help="decode a CCSDS RS-protected stream, correcting bit errors",
     )
     p_decode_rs.add_argument("input", help="RS-protected binary file")
-    p_decode_rs.add_argument("output", help="recovered ASTRAL binary file")
+    p_decode_rs.add_argument("output", help="recovered GistLink binary file")
     p_decode_rs.add_argument(
         "--e",
         type=int,
@@ -562,9 +665,9 @@ def main(argv=None):
 
     p_frame_tm = sub.add_parser(
         "frame-tm",
-        help="segment an ASTRAL binary into CCSDS TM Transfer Frames",
+        help="segment an GistLink binary into CCSDS TM Transfer Frames",
     )
-    p_frame_tm.add_argument("input", help="ASTRAL binary (or RS-protected) file")
+    p_frame_tm.add_argument("input", help="GistLink binary (or RS-protected) file")
     p_frame_tm.add_argument("output", help="TM wire stream output file")
     p_frame_tm.add_argument(
         "--scid",
@@ -593,7 +696,7 @@ def main(argv=None):
 
     p_deframe_tm = sub.add_parser(
         "deframe-tm",
-        help="decode CCSDS TM Transfer Frames and recover the ASTRAL payload",
+        help="decode CCSDS TM Transfer Frames and recover the GistLink payload",
     )
     p_deframe_tm.add_argument("input", help="TM wire stream file")
     p_deframe_tm.add_argument(

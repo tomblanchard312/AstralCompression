@@ -1,11 +1,11 @@
 """
-CCSDS 133.0-B-2 Space Packet Protocol wrapper for ASTRAL atom streams.
+CCSDS 133.0-B-2 Space Packet Protocol wrapper for GistLink atom streams.
 
-This module provides a thin outer envelope that wraps ASTRAL atom streams
+This module provides a thin outer envelope that wraps GistLink atom streams
 in CCSDS Space Packet headers. Ground stations (COSMOS, OpenMCT, SatNOGS,
 gr-satellites) can parse and route these packets without custom logic.
 
-Nothing about the ASTRAL codec, fountain code, or atom format is changed;
+Nothing about the GistLink codec, fountain code, or atom format is changed;
 this is purely a framing layer.
 """
 
@@ -86,22 +86,22 @@ class SpacePacketSequenceCounter:
 
 
 def wrap(
-    astral_stream: bytes,
+    gistlink_stream: bytes,
     msg_type: str,
     counter: SpacePacketSequenceCounter,
 ) -> bytes:
     """
-    Wrap an ASTRAL atom stream in a CCSDS Space Packet header.
+    Wrap an GistLink atom stream in a CCSDS Space Packet header.
 
-    The ASTRAL stream becomes the User Data Field. The 6-byte primary
+    The GistLink stream becomes the User Data Field. The 6-byte primary
     header is prepended in big-endian format.
 
     Parameters
     ----------
-    astral_stream : bytes
-        Raw ASTRAL atom stream (output of any pack_* function).
+    gistlink_stream : bytes
+        Raw GistLink atom stream (output of any pack_* function).
     msg_type : str
-        ASTRAL message type key, e.g. "DETECT", "CMD".
+        GistLink message type key, e.g. "DETECT", "CMD".
         Must be a key in APID_MAP.
     counter : SpacePacketSequenceCounter
         Sequence counter; counter.next(apid) is called once.
@@ -109,24 +109,24 @@ def wrap(
     Returns
     -------
     bytes
-        Complete CCSDS Space Packet (6-byte header + astral_stream).
+        Complete CCSDS Space Packet (6-byte header + gistlink_stream).
 
     Raises
     ------
     ValueError
-        If msg_type is not in APID_MAP, astral_stream is not bytes or empty,
-        or astral_stream exceeds 65536 bytes.
+        If msg_type is not in APID_MAP, gistlink_stream is not bytes or empty,
+        or gistlink_stream exceeds 65536 bytes.
     """
     # Validate inputs
-    if not isinstance(astral_stream, bytes) or len(astral_stream) == 0:
-        raise ValueError("astral_stream must be non-empty bytes")
+    if not isinstance(gistlink_stream, bytes) or len(gistlink_stream) == 0:
+        raise ValueError("gistlink_stream must be non-empty bytes")
 
     if msg_type not in APID_MAP:
         raise ValueError(f"unknown msg_type '{msg_type}'")
 
-    if len(astral_stream) > 65536:
+    if len(gistlink_stream) > 65536:
         raise ValueError(
-            f"astral_stream size {len(astral_stream)} exceeds " f"maximum 65536 bytes"
+            f"gistlink_stream size {len(gistlink_stream)} exceeds " f"maximum 65536 bytes"
         )
 
     apid, packet_type = APID_MAP[msg_type]
@@ -135,10 +135,10 @@ def wrap(
     # Build 6-byte header in big-endian
     word1 = (0b000 << 13) | (packet_type << 12) | (0 << 11) | apid
     word2 = (0b11 << 14) | seq_count
-    data_length = len(astral_stream) - 1
+    data_length = len(gistlink_stream) - 1
 
     header = struct.pack(">HHH", word1, word2, data_length)
-    return header + astral_stream
+    return header + gistlink_stream
 
 
 def unwrap(packet: bytes) -> dict:
@@ -163,7 +163,7 @@ def unwrap(packet: bytes) -> dict:
         - seq_flags: int (should be 3 for standalone)
         - seq_count: int (0–16383)
         - msg_type: str (looked up from APID_MAP; "UNKNOWN" if not found)
-        - astral_stream: bytes (the payload)
+        - gistlink_stream: bytes (the payload)
 
     Raises
     ------
@@ -195,7 +195,7 @@ def unwrap(packet: bytes) -> dict:
             f"but packet has {expected_data_len} bytes"
         )
 
-    astral_stream = packet[6:]
+    gistlink_stream = packet[6:]
 
     msg_type = _APID_TO_TYPE.get(apid, "UNKNOWN")
 
@@ -207,7 +207,7 @@ def unwrap(packet: bytes) -> dict:
         "seq_flags": seq_flags,
         "seq_count": seq_count,
         "msg_type": msg_type,
-        "astral_stream": astral_stream,
+        "gistlink_stream": gistlink_stream,
     }
 
 

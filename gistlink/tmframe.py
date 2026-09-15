@@ -6,7 +6,7 @@ Two data-field modes are supported:
 
 ``VCA`` (default)
     The data field carries an opaque Virtual Channel Access SDU, which is what
-    a raw ASTRAL atom stream is. The Sync Flag is set to 1 and the fields the
+    a raw GistLink atom stream is. The Sync Flag is set to 1 and the fields the
     standard leaves undefined in that case are zeroed.
 
 ``PACKET``
@@ -176,7 +176,7 @@ def encode_frames(
     Parameters
     ----------
     data : bytes
-        Payload. In ``MODE_VCA`` this is an opaque SDU (an ASTRAL atom
+        Payload. In ``MODE_VCA`` this is an opaque SDU (an GistLink atom
         stream); in ``MODE_PACKET`` it must be a concatenation of complete
         CCSDS Space Packets.
     scid : int

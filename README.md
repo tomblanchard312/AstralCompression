@@ -1,11 +1,17 @@
-# ASTRAL — Atomic Semantic Tiles with Robust Asynchronous Linking
+# GistLink
 
-Extreme compression and loss-tolerant message delivery for deep-space RF links.
+**Loss-tolerant messaging for one-way links, where the gist arrives first.**
 
-ASTRAL combines three things that are usually kept apart:
+Built for links you cannot retransmit over: deep space, disaster comms, LoRa,
+sonar, anywhere a lost packet is simply lost. A general compressor is
+catastrophically brittle there. Drop 1% of a zstd stream and you get nothing
+at all; GistLink recovers the full payload through 30% loss, and below that
+still hands you a summary of what was sent.
 
-- **Domain-aware compression** (the McKay codec): quantised, delta-coded
-  telemetry, byte-reordered float arrays, abbreviation-coded mission text.
+It combines three things usually kept apart:
+
+- **Domain-aware compression**: quantised, delta-coded telemetry,
+  byte-reordered float arrays, dictionary-compressed mission text.
 - **Gist-first framing**: a replicated metadata atom, so a receiver learns
   what was sent even when it recovers none of the body.
 - **Fountain-coded payloads** (LT codes) in fixed 32-byte atoms with CRC-8, so
@@ -14,18 +20,18 @@ ASTRAL combines three things that are usually kept apart:
 The core is pure Python 3.9+ with no required dependencies. Reed-Solomon,
 Codec2 voice and the Rust fast path are optional extras.
 
-**GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
-**License**: MIT with an attribution requirement. See [LICENSE](LICENSE).
+Every number in this README is measured by a script in this repository, and
+the comparisons include the cases where GistLink loses.
 
-> **Inspired by**: [Atlantis Data Burst](https://www.gateworld.net/wiki/Atlantis_data_burst).
-> The name is a nod to the fiction; everything below is measured.
+**GitHub**: [github.com/tomblanchard312/gistlink](https://github.com/tomblanchard312/gistlink)
+**License**: MIT with an attribution requirement. See [LICENSE](LICENSE).
 
 ## Documentation
 
 | Document | What it covers |
 |---|---|
 | [docs/FORMAT.md](docs/FORMAT.md) | The wire format specification: every byte, enough to reimplement |
-| [docs/INTEGRATION.md](docs/INTEGRATION.md) | McKay + ASTRAL guide, measured ratios, redundancy sizing |
+| [docs/INTEGRATION.md](docs/INTEGRATION.md) | GistLink guide, measured ratios, redundancy sizing |
 | [docs/QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md) | Command and API cheat sheet |
 | [CHANGELOG.md](CHANGELOG.md) | What changed and why |
 | [RELEASE_NOTES.md](RELEASE_NOTES.md) | This release: scope, compatibility, known limits |
@@ -33,52 +39,102 @@ Codec2 voice and the Rust fast path are optional extras.
 ## Install
 
 ```bash
-pip install astral-compression            # core, no dependencies
-pip install astral-compression[rs]        # + Reed-Solomon (reedsolo)
-pip install astral-compression[voice]     # + Codec2 voice (pycodec2, numpy)
-pip install astral-compression[fast]      # + Rust extension and zstd
-pip install astral-compression[all]       # everything
+pip install gistlink            # core, no dependencies
+pip install gistlink[rs]        # + Reed-Solomon (reedsolo)
+pip install gistlink[dict]      # + mission dictionaries (zstandard)
+pip install gistlink[voice]     # + Codec2 voice (pycodec2, numpy)
+pip install gistlink[fast]      # + Rust extension and zstd
+pip install gistlink[all]       # everything
 ```
 
 ## Quick start
 
 ```bash
 # Pack a JSON message into atomized binary, lose 40% of it, decode anyway
-python -m astral.cli pack examples/detect.json out.bin
-python -m astral.cli simulate out.bin lossy.bin --drop 0.4 --seed 1
-python -m astral.cli unpack lossy.bin
+python -m gistlink.cli pack examples/detect.json out.bin
+python -m gistlink.cli simulate out.bin lossy.bin --drop 0.4 --seed 1
+python -m gistlink.cli unpack lossy.bin
 ```
 
 ```bash
-# Compress a file with McKay and send it as gist-first atoms
-python -m astral.cli pack-mckay report.txt out.bin --type TEXT
-python -m astral.cli unpack-mckay out.bin recovered.txt
+# Compress a file with and send it as gist-first atoms
+python -m gistlink.cli pack-file report.txt out.bin --type TEXT
+python -m gistlink.cli unpack-file out.bin recovered.txt
 ```
 
 ```python
-from astral import pack_mckay_message, unpack_mckay_stream
+from gistlink import pack_compressed_message, unpack_compressed_stream
 
-stream = pack_mckay_message(open("telemetry.bin", "rb").read(), "TELEMETRY")
-result = unpack_mckay_stream(stream)
-result["mckay"]   # metadata gist: type, sizes, ratio (survives body loss)
+stream = pack_compressed_message(open("telemetry.bin", "rb").read(), "TELEMETRY")
+result = unpack_compressed_stream(stream)
+result["compression"]   # metadata gist: type, sizes, ratio (survives body loss)
 result["data"]    # recovered bytes, once enough atoms arrive
 ```
 
 ## Measured performance
 
 Every number below is produced by a script in this repository on the datasets
-those scripts generate. Reproduce with `python benchmarks/mckay_vs_standard.py` and
-`python -m astral.mckay_usage_example`. Expect variation with your data.
+those scripts generate. Reproduce with `python benchmarks/compression_benchmark.py` and
+`python examples/usage.py`. Expect variation with your data.
 
-### Compression, McKay vs general-purpose codecs
+### Mission dictionaries: the biggest win on short messages
 
-| Dataset | McKay | zstd -9 | LZMA -9 | Notes |
+A general compressor has nothing to work with inside a 90-byte status report;
+the patterns that make mission traffic compressible live *between* messages.
+Train a dictionary on past traffic and hand it to both ends:
+
+```bash
+gistlink train-dict "samples/*.txt" -o mission.dict
+gistlink pack-file report.txt out.bin --type TEXT --dict mission.dict
+gistlink unpack-file out.bin recovered.txt --dict mission.dict
+```
+
+100 short mission messages, compressed individually:
+
+| Method | Total |
+|---|---|
+| zstd -19, no dictionary | 7,049 B |
+| built-in text transform | 4,578 B |
+| **zstd -19 + trained dictionary** | **3,650 B** |
+
+That is 20% better than the built-in transform, and it is the honest
+recommendation for message traffic. Set it once and forget it:
+
+```bash
+export GISTLINK_DICT=/etc/gistlink/mission-v1.dict   # used by pack and unpack
+```
+
+**Train it on your own traffic.** A dictionary only helps on data that
+resembles what it was trained on. Measured with a mission-vocabulary
+dictionary applied to traffic it did not match, it made JSON status messages
+8% *bigger* and log lines 2% bigger. That is why there is no built-in
+dictionary: a generic one would be a regression for most real traffic.
+
+Applying one is nevertheless safe. The compressor produces both encodings and
+sends the smaller, so a dictionary that does not fit costs nothing:
+
+| Traffic | Without dictionary | With | Result |
+|---|---|---|---|
+| Matches the training set | 3,156 B | 2,235 B | 29% better |
+| Log lines | 4,730 B | 4,730 B | falls back |
+| JSON status | 4,490 B | 4,490 B | falls back |
+
+The dictionary is mission configuration: ship the file to both ends, version
+it, and keep every version still in use, since a receiver must decode older
+traffic. A receiver without it reports the dictionary id it needs rather than
+failing generically.
+
+Requires `pip install gistlink[dict]`.
+
+### Compression, GistLink vs general-purpose codecs
+
+| Dataset | GistLink | zstd -9 | LZMA -9 | Notes |
 |---|---|---|---|---|
-| Telemetry, 160 KB float32, 4 channels | **3.60x** | 1.12x | 1.43x | McKay is lossy here (Q12) |
+| Telemetry, 160 KB float32, 4 channels | **3.60x** | 1.12x | 1.43x | lossy here (Q12) |
 | Binary float32, 100 KB, random | **1.17x** | 1.08x | 1.08x | random data barely compresses |
 | Mission text, 200 KB | **11.66x** | 7.98x | 9.95x | exact |
 
-McKay's telemetry advantage comes from quantisation, so it is not a
+the engine's telemetry advantage comes from quantisation, so it is not a
 like-for-like comparison with the exact codecs: Q12 quantisation introduces a
 relative error of about 1.2e-4 of the signal range. Use `BINARY` rather than
 `TELEMETRY` when you need bit-exact floats.
@@ -92,10 +148,15 @@ Includes the header, the gist and all fountain redundancy:
 | Mission text | 9,600 B | 736 B | 13.0x |
 | Telemetry (1 channel, float32) | 32,000 B | 8,448 B | 3.8x |
 
-Small messages *expand*: `examples/detect.json` is 146 bytes of JSON and ships
-as 480 bytes in 15 atoms.
+Small messages *expand*, and there is a floor: the minimum message is around
+19 atoms (608 bytes) once header replication, the metadata gist and the
+minimum fountain redundancy are counted, however small the payload.
+`examples/detect.json` is 146 bytes of JSON and ships as 480 bytes in 15
+atoms. That floor is the price of surviving loss, not waste, but it means
+compression barely matters below a kilobyte: at those sizes tune
+`min_redundancy` and `header_redundancy` instead.
 
-The wire cost is predictable, so you can work out in advance whether ASTRAL
+The wire cost is predictable, so you can work out in advance whether GistLink
 pays for a given payload:
 
 ```
@@ -104,8 +165,8 @@ wire bytes  ~=  compressed bytes  x  32/21 (atom framing)
                                   +  32 x header copies
 ```
 
-That is roughly **3x the compressed size** at the default settings, so McKay
-has to compress better than about 3x before the transmission is smaller than
+That is roughly **3x the compressed size** at the default settings, so compression
+has to do better than about 3x before the transmission is smaller than
 the source. Repetitive mission text and telemetry clear that easily; already
 compressed or random data does not.
 
@@ -139,10 +200,10 @@ copy is lost there is nothing to decode. Replication is therefore the floor on
 survivability, and it is tunable:
 
 ```python
-from astral import header_redundancy_for, pack_mckay_message
+from gistlink import header_redundancy_for, pack_compressed_message
 
 # Keep the gist alive with 99% confidence on a link that drops 80% of atoms.
-stream = pack_mckay_message(
+stream = pack_compressed_message(
     data, "TEXT", header_redundancy=header_redundancy_for(0.8)  # -> 21 copies
 )
 ```
@@ -154,8 +215,8 @@ fountain atom count), which is sized for ordinary links, not for 80% loss.
 
 | Operation | Rate |
 |---|---|
-| `pack_mckay_message`, 200 KB binary | ~0.45 s |
-| `unpack_mckay_stream`, 200 KB | ~0.57 s |
+| `pack_compressed_message`, 200 KB binary | ~0.45 s |
+| `unpack_compressed_stream`, 200 KB | ~0.57 s |
 | TM framing / deframing | ~13 MB/s |
 | Fountain encode, K=2000, 4000 packets | 27 ms |
 | Fountain decode, K=2000 | 40 ms |
@@ -190,14 +251,14 @@ An atom is 32 bytes:
 | 3-4 | atom_index (uint16 LE) |
 | 5-6 | total_atoms (uint16 LE) |
 | 7-8 | message_id (uint16 LE) |
-| 9 | atom_type: `0=HEADER_GIST`, `1=FOUNTAIN_PACKET`, `2=DICT_UPDATE`, `3=MCKAY_GIST` |
+| 9 | atom_type: `0=HEADER_GIST`, `1=FOUNTAIN_PACKET`, `2=DICT_UPDATE`, `3=COMPRESSED_GIST` |
 | 10-30 | payload (21 bytes) |
 | 31 | CRC-8/J1850 over bytes 0-30 |
 
 - **HEADER_GIST** carries source block count K, symbol size (16), payload
   length, fountain seed, the packed gist bits, and a CRC-32 over the header
   and payload together. It is replicated; see `header_redundancy_for`.
-- **MCKAY_GIST** carries the McKay version, transform, data type, original and
+- **COMPRESSED_GIST** carries the container version, transform, data type, original and
   compressed sizes, channel count and entropy coder. Also replicated.
 - **FOUNTAIN_PACKET** carries a packet seed, degree and a 16-byte XOR block.
 - The receiver scans for the sync word, so a stream that starts mid-atom or
@@ -256,8 +317,8 @@ closed. Decoding a command verifies it by default, and refuses to hand back
 its contents otherwise:
 
 ```python
-from astral import unpack_stream
-from astral.commands import CommandSequencer, ReplayGuard
+from gistlink import unpack_stream
+from gistlink.commands import CommandSequencer, PersistentReplayGuard
 
 # Sender: a counter that always increases.
 seq = CommandSequencer()
@@ -266,10 +327,23 @@ stream = pack_cmd_message(
     key=KEY, counter=seq.next(),
 )
 
-# Receiver: one guard per uplink key, kept across contacts.
-guard = ReplayGuard()
+# Receiver: one guard per uplink key, on disk so it survives a restart.
+guard = PersistentReplayGuard("/var/lib/gistlink/uplink.json", "sat-1")
 result = unpack_stream(stream, key=KEY, replay_guard=guard)
 result["command_authenticated"]   # True, False, or None if not a command
+```
+
+Use `PersistentReplayGuard` for anything commanding real hardware. The
+in-memory `ReplayGuard` protects only a single run: a receiver that restarts
+begins again at -1 and will accept a command it has already executed. The
+persistent guard writes the counter durably **before** accepting the command,
+so a crash can lose a command but never execute one twice, and it refuses to
+run on a state file it cannot parse rather than silently reopening the window.
+
+From the command line:
+
+```bash
+gistlink unpack cmd.bin --key $KEY --replay-state /var/lib/gistlink/uplink.json --link-id sat-1
 ```
 
 A command that fails its HMAC, arrives without one, or repeats a counter the
@@ -287,23 +361,23 @@ authenticity: keep the `ReplayGuard` for the life of the key.
 
 ## Space communications standards
 
-ASTRAL is not a replacement for CCSDS. It is a payload format that can be
+GistLink is not a replacement for CCSDS. It is a payload format that can be
 carried inside CCSDS framing, and the framing implemented here is conformant
 where it claims to be.
 
-**CCSDS 133.0-B-2 Space Packet Protocol** (`astral/spacepacket.py`)
+**CCSDS 133.0-B-2 Space Packet Protocol** (`gistlink/spacepacket.py`)
 Six-byte primary header, 14-bit per-APID sequence counters, idle packets.
 APIDs: DETECT 0x010, STATUS 0x011, TEXT 0x012, VOICE 0x013, CMD 0x100,
 CMD_BATCH 0x101. Covered by `tests/test_ccsds.py`.
 
-**CCSDS 132.0-B-3 TM Transfer Frames + 131.0-B-5 randomizer** (`astral/tmframe.py`)
+**CCSDS 132.0-B-3 TM Transfer Frames + 131.0-B-5 randomizer** (`gistlink/tmframe.py`)
 1115-byte frames, ASM 0x1ACFFC1D, CRC-16-CCITT FECF, SCID/VCID, master and
 virtual channel counters. The pseudo-randomizer generates the published CCSDS
 sequence (`FF 48 0E C0 9A 0D 70 BC`) and is applied to the entire transfer
 frame, header and FECF included, exactly as the standard specifies. Two data
 field modes:
 
-- `MODE_VCA` (default): the data field is an opaque VCA_SDU (a raw ASTRAL atom
+- `MODE_VCA` (default): the data field is an opaque VCA_SDU (a raw GistLink atom
   stream), sync flag 1.
 - `MODE_PACKET`: the data field carries CCSDS Space Packets, sync flag 0,
   segment length ID `11`, and a real First Header Pointer, so a standard
@@ -312,7 +386,7 @@ field modes:
 
 Covered by `tests/test_ccsds.py`.
 
-**CCSDS Reed-Solomon** (`astral/rs_fec.py`, needs the `rs` extra)
+**CCSDS Reed-Solomon** (`gistlink/rs_fec.py`, needs the `rs` extra)
 Two distinct codes, not interchangeable:
 
 - `encode_codeblock` / `decode_codeblock`: RS(255,223) and RS(255,239) over
@@ -342,7 +416,7 @@ Covered by `tests/test_ccsds.py`, with parity vectors in `tests/test_vectors.py`
 
 A ground station that speaks CCSDS will synchronise, derandomise, check the
 FECF and route by APID without custom code. It will **not** understand the
-ASTRAL atoms inside: the gist, fountain decoding and McKay decompression need
+GistLink atoms inside: the gist, fountain decoding and decompression need
 this library (or a reimplementation of it) at the receiving end. Treat CCSDS
 support as transport compatibility, not as end-to-end interoperability.
 
@@ -351,8 +425,8 @@ support as transport compatibility, not as end-to-end interoperability.
 ### TEXT
 
 ```bash
-python -m astral.cli pack-text "Hello from the far side." out_text.bin
-python -m astral.cli unpack out_text.bin
+python -m gistlink.cli pack-text "Hello from the far side." out_text.bin
+python -m gistlink.cli unpack out_text.bin
 ```
 
 Text roundtrips exactly, including capitalisation and whitespace.
@@ -360,8 +434,8 @@ Text roundtrips exactly, including capitalisation and whitespace.
 ### VOICE (WAV to bitstream)
 
 ```bash
-python -m astral.cli pack-voice input.wav out_voice.bin
-python -m astral.cli unpack-voice out_voice.bin recovered.wav
+python -m gistlink.cli pack-voice input.wav out_voice.bin
+python -m gistlink.cli unpack-voice out_voice.bin recovered.wav
 ```
 
 Codec2 re-encoding requires the `voice` extra; without it voice falls back to
@@ -370,28 +444,28 @@ LZMA passthrough.
 ### CMD (optional HMAC authentication)
 
 ```bash
-python -m astral.cli pack-cmd '{"name":"POINT","az":-12.3456,"el":30.0}' out_cmd.bin \
+python -m gistlink.cli pack-cmd '{"name":"POINT","az":-12.3456,"el":30.0}' out_cmd.bin \
   --key 00112233445566778899aabbccddeeff
-python -m astral.cli unpack out_cmd.bin
+python -m gistlink.cli unpack out_cmd.bin
 ```
 
 ### Mission lexicon updates (DICT_UPDATE)
 
 ```bash
-python -m astral.cli pack-text-with-dict "kepler,thruster,firing,anomaly" \
+python -m gistlink.cli pack-text-with-dict "kepler,thruster,firing,anomaly" \
   "Kepler reports thruster anomaly." out_text_dict.bin
 ```
 
 ### Batched, time-tagged commands (CMD_BATCH)
 
 ```bash
-python -m astral.cli pack-cmd-batch '{"policy":{"rollback_on_fail":true},"items":[{"tai_offset_s":5,"cmd":{"name":"SET_MODE","mode":"SCIENCE"}}]}' out_batch.bin \
+python -m gistlink.cli pack-cmd-batch '{"policy":{"rollback_on_fail":true},"items":[{"tai_offset_s":5,"cmd":{"name":"SET_MODE","mode":"SCIENCE"}}]}' out_batch.bin \
   --key 00112233445566778899aabbccddeeff
 ```
 
-## McKay compression format (v3)
+## compression format (v3)
 
-10-byte header: magic `MK`, version, transform id, original length (uint32 LE),
+10-byte header: magic `GL`, version, transform id, original length (uint32 LE),
 channel count, entropy coder. Transforms: passthrough, text (abbreviation
 coding), telemetry (Q12 quantisation plus per-channel delta coding), Codec2
 voice, binary float (byte reordering). Entropy coders: LZMA, zlib, zstd, none.
@@ -403,7 +477,7 @@ truncated.
 
 ## Rust fast path
 
-`astral_compress/` holds an optional PyO3 extension implementing the telemetry,
+`gistlink_native/` holds an optional PyO3 extension implementing the telemetry,
 binary-float and text transforms with zstd. Build it with
 `maturin build --release` inside that directory and install the wheel, or use
 the `fast` extra. Without it everything still works in pure Python.
@@ -416,8 +490,8 @@ reports per-dataset timings, ratios and an average speedup.
 
 ```bash
 pip install pytest reedsolo numpy
-python -m pytest tests            # 264 passed, 19 skipped without the Rust extension
-python -m flake8 astral/ tests/ *.py --config=setup.cfg
+python -m pytest tests            # 301 passed, 19 skipped without the Rust extension
+python -m flake8 gistlink/ tests/ *.py --config=setup.cfg
 ```
 
 The skipped tests are the Rust extension suite; they run in CI, where the
@@ -430,7 +504,7 @@ covered by `tests/test_ccsds.py`.
 
 ## Limitations
 
-- The grammar covers DETECT and STATUS. Extend `astral/grammar.py` for more.
+- The grammar covers DETECT and STATUS. Extend `gistlink/grammar.py` for more.
 - Symbol size is fixed at 16 bytes; soliton parameters are simple defaults.
 - Telemetry compression is lossy (Q12). Use `BINARY` for bit-exact floats.
 - One message is capped near 512 KB of payload by the 16-bit atom counters.
@@ -441,7 +515,7 @@ covered by `tests/test_ccsds.py`.
 
 ## Repository and license
 
-**GitHub**: [github.com/tomblanchard312/astralcompression](https://github.com/tomblanchard312/astralcompression)
+**GitHub**: [github.com/tomblanchard312/gistlink](https://github.com/tomblanchard312/gistlink)
 
 MIT License with an attribution requirement: any use, distribution or
 derivative work must include a clear and prominent attribution to the original

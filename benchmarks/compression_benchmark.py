@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Compare McKay domain-aware compression against zstd and LZMA.
+Compare GistLink's domain-aware compression against zstd and LZMA.
 
 Every measurement here is verified: each codec must reproduce its input (or,
 for lossy telemetry quantisation, reproduce it within the quantiser's error
 bound) before its ratio is reported. Run it to reproduce the numbers quoted in
 the README:
 
-    python benchmarks/mckay_vs_standard.py
-    python benchmarks/mckay_vs_standard.py --iterations 5
+    python benchmarks/compression_benchmark.py
+    python benchmarks/compression_benchmark.py --iterations 5
 
-The McKay column uses the Rust extension when it is built and the pure Python
+The GistLink column uses the Rust extension when it is built and the pure Python
 implementation otherwise; the report says which.
 """
 import sys
@@ -35,7 +35,7 @@ import zlib
 
 import numpy as np
 
-from astral import mckay_astral_integration as mckay
+from gistlink import compress as engine
 
 try:
     import zstandard as _zstandard
@@ -101,16 +101,16 @@ def _max_float_error(a: bytes, b: bytes) -> float:
 def benchmark(data: bytes, data_type: str, channels: int, iterations: int) -> dict:
     """Measure every codec on one dataset, verifying each reconstruction."""
     results = {}
-    mckay_type = {"telemetry": "TELEMETRY", "binary_float": "BINARY", "text": "TEXT"}[
+    compress_type = {"telemetry": "TELEMETRY", "binary_float": "BINARY", "text": "TEXT"}[
         data_type
     ]
 
-    def mckay_compress(d):
-        return mckay.compress(d, mckay_type, channels=channels)
+    def run_engine(d):
+        return engine.compress(d, compress_type, channels=channels)
 
-    seconds, compressed = _time_it(mckay_compress, data, iterations)
-    restored = mckay.decompress(compressed)
-    if mckay_type == "TELEMETRY":
+    seconds, compressed = _time_it(run_engine, data, iterations)
+    restored = engine.decompress(compressed)
+    if compress_type == "TELEMETRY":
         # Q12 quantisation is lossy by design: check the error bound instead.
         err = _max_float_error(data, restored)
         exact = f"lossy, max err {err:.2e} of range"
@@ -118,7 +118,7 @@ def benchmark(data: bytes, data_type: str, channels: int, iterations: int) -> di
     else:
         exact = "exact" if restored == data else "MISMATCH"
         verified = restored == data
-    results["mckay"] = {
+    results["gistlink"] = {
         "seconds": seconds,
         "size": len(compressed),
         "ratio": len(data) / len(compressed),
@@ -162,14 +162,14 @@ def print_table(data_type: str, size: int, results: dict) -> None:
             f"{r['throughput']:>9.1f}  {r['fidelity']}"
         )
 
-    mckay_ratio = results["mckay"]["ratio"]
-    baselines = {k: v["ratio"] for k, v in results.items() if k != "mckay"}
+    compression_ratio = results["gistlink"]["ratio"]
+    baselines = {k: v["ratio"] for k, v in results.items() if k != "gistlink"}
     best_name = max(baselines, key=baselines.get)
     best = baselines[best_name]
-    delta = (mckay_ratio / best - 1.0) * 100.0
+    delta = (compression_ratio / best - 1.0) * 100.0
     verdict = "better than" if delta >= 0 else "worse than"
     print(
-        f"McKay is {abs(delta):.1f}% {verdict} the best general-purpose codec "
+        f"GistLink is {abs(delta):.1f}% {verdict} the best general-purpose codec "
         f"({best_name}, {best:.2f}x)"
     )
 
@@ -179,10 +179,10 @@ def main() -> int:
     parser.add_argument("--iterations", type=int, default=3)
     args = parser.parse_args()
 
-    print("McKay vs Standard Compression Comparison")
+    print("GistLink vs standard compression")
     print("=" * 62)
-    backend = "Rust extension" if mckay._RUST_AVAILABLE else "pure Python"
-    print(f"McKay backend: {backend}")
+    backend = "Rust extension" if engine._RUST_AVAILABLE else "pure Python"
+    print(f"Compression backend: {backend}")
     if _zstandard is None:
         print("zstd baseline skipped (pip install zstandard)")
 

@@ -5,7 +5,7 @@ import os
 import struct
 import zlib
 from .container import make_atom, parse_atoms
-from .container import HEADER_GIST, FOUNTAIN_PACKET, DICT_UPDATE, MCKAY_GIST
+from .container import HEADER_GIST, FOUNTAIN_PACKET, DICT_UPDATE, COMPRESSED_GIST
 from .grammar import make_gist_bits, encode_payload, decode_payload
 from .grammar import parse_gist
 from .textpack import encode_text, decode_text
@@ -16,6 +16,7 @@ from .commands import (
     encode_cmd_batch,
     decode_cmd_batch,
 )
+from .compress import MissingDictionaryError
 from .voice import encode_wav_to_bitstream
 from .dict_update import split_words_from_atoms, make_dict_update_atoms
 from .fountain import lt_encode_blocks, lt_decode_blocks
@@ -110,7 +111,7 @@ def _check_payload_size(
     limit = max_payload_bytes(min_redundancy, extra_fountain)
     if payload_len > limit:
         raise ValueError(
-            f"payload too large for a single ASTRAL message: {payload_len} "
+            f"payload too large for a single GistLink message: {payload_len} "
             f"bytes (max {limit} at this redundancy). Split it across "
             f"messages."
         )
@@ -412,7 +413,7 @@ def _pack_with_custom_payload(
     for atom_type, p in extra_atoms or []:
         # Metadata gists are replicated alongside the header; anything else
         # (a dictionary update, say) is sent once.
-        copies = n_header if atom_type == MCKAY_GIST else 1
+        copies = n_header if atom_type == COMPRESSED_GIST else 1
         atoms.extend([(atom_type, p)] * copies)
     for p in _fountain_atom_payloads(blocks, fountain_seed, M):
         atoms.append((FOUNTAIN_PACKET, p))
@@ -434,7 +435,7 @@ def _emit_atoms(atoms, message_id: int) -> bytes:
     return bytes(out)
 
 
-MCKAY_DATA_TYPES = {
+COMPRESS_DATA_TYPES = {
     "AUTO": 0,
     "TEXT": 1,
     "TELEMETRY": 2,
@@ -442,11 +443,11 @@ MCKAY_DATA_TYPES = {
     "BINARY": 4,
     "IMAGE": 5,
 }
-_INV_MCKAY_DATA_TYPES = {v: k for k, v in MCKAY_DATA_TYPES.items()}
+_INV_COMPRESS_DATA_TYPES = {v: k for k, v in COMPRESS_DATA_TYPES.items()}
 
 
-def _mckay_gist_atom(
-    mckay_version: int,
+def _compressed_gist_atom(
+    compress_version: int,
     transform_id: int,
     data_type: str,
     original_size: int,
@@ -455,7 +456,7 @@ def _mckay_gist_atom(
     entropy_coder: int,
 ) -> bytes:
     """
-    Build the 21-byte MCKAY_GIST payload.
+    Build the 21-byte COMPRESSED_GIST payload.
 
     This is the atom that makes the gist-first claim real for compressed
     payloads: it is replicated like the header, so a receiver that recovers no
@@ -463,9 +464,9 @@ def _mckay_gist_atom(
     hard it was squeezed.
     """
     p = bytearray(21)
-    p[0] = mckay_version & 0xFF
+    p[0] = compress_version & 0xFF
     p[1] = transform_id & 0xFF
-    p[2] = MCKAY_DATA_TYPES.get(data_type, 0) & 0xFF
+    p[2] = COMPRESS_DATA_TYPES.get(data_type, 0) & 0xFF
     p[3:7] = (original_size & 0xFFFFFFFF).to_bytes(4, "little")
     p[7:11] = (compressed_size & 0xFFFFFFFF).to_bytes(4, "little")
     p[11] = channels & 0xFF
@@ -473,13 +474,13 @@ def _mckay_gist_atom(
     return bytes(p)
 
 
-def _parse_mckay_gist(p: bytes) -> dict:
+def _parse_compressed_gist(p: bytes) -> dict:
     original_size = int.from_bytes(p[3:7], "little")
     compressed_size = int.from_bytes(p[7:11], "little")
     return {
-        "mckay_version": p[0],
+        "compress_version": p[0],
         "transform_id": p[1],
-        "data_type": _INV_MCKAY_DATA_TYPES.get(p[2], f"TYPE_{p[2]}"),
+        "data_type": _INV_COMPRESS_DATA_TYPES.get(p[2], f"TYPE_{p[2]}"),
         "original_size": original_size,
         "compressed_size": compressed_size,
         "channels": p[11],
@@ -488,7 +489,7 @@ def _parse_mckay_gist(p: bytes) -> dict:
     }
 
 
-def pack_mckay_message(
+def pack_compressed_message(
     data: bytes,
     data_type: str = "AUTO",
     message_id: int | None = None,
@@ -498,11 +499,12 @@ def pack_mckay_message(
     channels: int = 0,
     header_redundancy: int | None = None,
     redundancy: float = 1.0,
+    dictionary=None,
 ) -> bytes:
     """
-    Compress with McKay, then send the result as gist-first atomized packets.
+    Compress, then send the result as gist-first atomized packets.
 
-    This is the full McKay + ASTRAL path: domain-aware compression, a
+    This is the full GistLink path: domain-aware compression, a
     replicated metadata gist, and a fountain-coded body, so a lossy link
     yields the gist first and the exact payload once enough atoms arrive.
 
@@ -516,73 +518,86 @@ def pack_mckay_message(
     message_id, extra_fountain, min_redundancy
         As for :func:`pack_message`.
     voice_bps, channels
-        Passed through to the McKay compressor.
+        Passed through to the compressor.
 
     Returns
     -------
     bytes
-        An ASTRAL atom stream.
+        An GistLink atom stream.
     """
-    from . import mckay_astral_integration as mckay
+    from . import compress as compress
 
     if not isinstance(data, bytes):
         raise TypeError("data must be bytes")
-    if data_type not in MCKAY_DATA_TYPES:
+    if data_type not in COMPRESS_DATA_TYPES:
         raise ValueError(
-            f"data_type must be one of {sorted(MCKAY_DATA_TYPES)}, got {data_type!r}"
+            f"data_type must be one of {sorted(COMPRESS_DATA_TYPES)}, got {data_type!r}"
         )
 
-    compressed = mckay.compress(
-        data, data_type=data_type, voice_bps=voice_bps, channels=channels
+    compressed = compress.compress(
+        data,
+        data_type=data_type,
+        voice_bps=voice_bps,
+        channels=channels,
+        dictionary=dictionary,
     )
-    version, transform_id, orig_len, ch, entropy_coder, _payload = mckay._parse_header(
+    version, transform_id, orig_len, ch, entropy_coder, _payload = compress._parse_header(
         compressed
     )
     resolved_type = data_type
     if resolved_type == "AUTO":
-        resolved_type = mckay._detect_type(data) if data else "BINARY"
+        resolved_type = compress._detect_type(data) if data else "BINARY"
 
-    gist_atom = _mckay_gist_atom(
+    gist_atom = _compressed_gist_atom(
         version,
         transform_id,
         resolved_type,
-        orig_len,
+        # The compact container declares no length; we know it here regardless.
+        orig_len or len(data),
         len(compressed),
         ch,
         entropy_coder,
     )
-    msgmeta = {"type": "MCKAY", "conf": 0.99}
+    msgmeta = {"type": "COMPRESS", "conf": 0.99}
     return _pack_with_custom_payload(
         msgmeta,
         compressed,
         extra_fountain,
         message_id,
         min_redundancy,
-        extra_atoms=[(MCKAY_GIST, gist_atom)],
+        extra_atoms=[(COMPRESSED_GIST, gist_atom)],
         header_redundancy=header_redundancy,
         redundancy=redundancy,
     )
 
 
-def unpack_mckay_stream(stream: bytes) -> dict:
+def unpack_compressed_stream(stream: bytes, dictionaries=None) -> dict:
     """
-    Decode a stream produced by :func:`pack_mckay_message`.
+    Decode a stream produced by :func:`pack_compressed_message`.
 
-    Returns the same keys as :func:`unpack_stream` plus ``mckay`` (the
-    metadata gist, present whenever any MCKAY_GIST atom survived) and
+    Returns the same keys as :func:`unpack_stream` plus ``compression`` (the
+    metadata gist, present whenever any COMPRESSED_GIST atom survived) and
     ``data`` (the decompressed bytes, present only on full recovery).
+
+    ``dictionaries`` is a :class:`gistlink.dictionary.DictionaryRegistry`,
+    required when the payload was compressed against a mission dictionary.
     """
-    result = unpack_stream(stream)
+    result = unpack_stream(stream, dictionaries=dictionaries)
     if "error" in result:
         return result
-    if result.get("mckay") is None:
-        result["error"] = "not a McKay stream: no MCKAY_GIST atom recovered"
+    if result.get("compression") is None:
+        result["error"] = "not a compressed stream: no COMPRESSED_GIST atom recovered"
     return result
 
 
-def unpack_stream(stream: bytes, key: bytes | None = None, replay_guard=None):
+def unpack_stream(
+    stream: bytes,
+    key: bytes | None = None,
+    replay_guard=None,
+    dictionaries=None,
+):
     """
-    Decode an ASTRAL stream.
+    Decode an GistLink stream.
 
     ``key`` and ``replay_guard`` apply to CMD and CMD_BATCH messages. With a
     key, a command that fails authentication or freshness is reported as an
@@ -602,7 +617,7 @@ def unpack_stream(stream: bytes, key: bytes | None = None, replay_guard=None):
 
     msg_id = atoms[0].message_id
     header_candidates = []
-    mckay_candidates = []
+    dict_candidates = []
     fountain_atoms = []
     dict_atoms = []
     total_atoms = atoms[0].total_atoms
@@ -618,8 +633,8 @@ def unpack_stream(stream: bytes, key: bytes | None = None, replay_guard=None):
             fountain_atoms.append(payload)
         elif typ == DICT_UPDATE:
             dict_atoms.append(payload)
-        elif typ == MCKAY_GIST:
-            mckay_candidates.append(payload)
+        elif typ == COMPRESSED_GIST:
+            dict_candidates.append(payload)
 
     if not header_candidates:
         return {"error": "missing header/gist atom"}
@@ -628,7 +643,7 @@ def unpack_stream(stream: bytes, key: bytes | None = None, replay_guard=None):
     # than whichever arrived first: one corrupt copy that slipped past its
     # CRC-8 then loses the vote instead of deciding how the payload is read.
     header_atom = _majority(header_candidates)
-    mckay_atom = _majority(mckay_candidates) if mckay_candidates else None
+    compression_atom = _majority(dict_candidates) if dict_candidates else None
 
     K = header_atom[0] | (header_atom[1] << 8)
     symbol_size = header_atom[2]
@@ -659,9 +674,14 @@ def unpack_stream(stream: bytes, key: bytes | None = None, replay_guard=None):
     complete = False
     recovered_fraction = 0.0
     message = None
-    mckay_gist = _parse_mckay_gist(mckay_atom) if mckay_atom is not None else None
+    compression_gist = (
+        _parse_compressed_gist(compression_atom)
+        if compression_atom is not None
+        else None
+    )
     decompressed = None
     integrity = None
+    decode_error = None
 
     if packets:
         recovered, frac = lt_decode_blocks(packets, K, symbol_size)
@@ -679,7 +699,7 @@ def unpack_stream(stream: bytes, key: bytes | None = None, replay_guard=None):
                         "total_atoms": total_atoms,
                         "received_atoms": len(atoms),
                         "gist": gist,
-                        "mckay": mckay_gist,
+                        "compression": compression_gist,
                         "complete": False,
                         "recovered_fraction": recovered_fraction,
                         "message": None,
@@ -697,13 +717,15 @@ def unpack_stream(stream: bytes, key: bytes | None = None, replay_guard=None):
                     extra_words = split_words_from_atoms(dict_atoms)
                 else:
                     extra_words = []
-                if mckay_gist is not None:
-                    from . import mckay_astral_integration as mckay
+                if compression_gist is not None:
+                    from . import compress as compress
 
-                    decompressed = mckay.decompress(payload)
+                    decompressed = compress.decompress(
+                        payload, dictionaries=dictionaries
+                    )
                     message = {
-                        "type": "MCKAY",
-                        "data_type": mckay_gist["data_type"],
+                        "type": "COMPRESS",
+                        "data_type": compression_gist["data_type"],
                         "bytes": decompressed,
                     }
                 elif mtype == "TEXT":
@@ -740,6 +762,23 @@ def unpack_stream(stream: bytes, key: bytes | None = None, replay_guard=None):
                 else:
                     message = decode_payload(payload)
                 complete = True
+            except MissingDictionaryError as exc:
+                # "fetch dictionary 214677415" is actionable; a bare decode
+                # failure is not.
+                return {
+                    "message_id": msg_id,
+                    "total_atoms": total_atoms,
+                    "received_atoms": len(atoms),
+                    "gist": gist,
+                    "compression": compression_gist,
+                    "complete": False,
+                    "recovered_fraction": recovered_fraction,
+                    "message": None,
+                    "data": None,
+                    "integrity_ok": integrity,
+                    "missing_dictionary": exc.dict_id,
+                    "error": str(exc),
+                }
             except CommandAuthError as exc:
                 # A command that cannot be authenticated must not look like a
                 # decode that merely failed for lack of atoms.
@@ -748,7 +787,7 @@ def unpack_stream(stream: bytes, key: bytes | None = None, replay_guard=None):
                     "total_atoms": total_atoms,
                     "received_atoms": len(atoms),
                     "gist": gist,
-                    "mckay": mckay_gist,
+                    "compression": compression_gist,
                     "complete": False,
                     "recovered_fraction": recovered_fraction,
                     "message": None,
@@ -757,22 +796,28 @@ def unpack_stream(stream: bytes, key: bytes | None = None, replay_guard=None):
                     "command_authenticated": False,
                     "error": f"command authentication failed: {exc}",
                 }
-            except Exception:
+            except Exception as exc:
+                # The payload reassembled but could not be interpreted. Record
+                # why: swallowing this silently makes a decode failure
+                # indistinguishable from "not enough atoms yet", which is a
+                # different problem with a different remedy.
                 complete = False
                 message = None
+                decode_error = f"{type(exc).__name__}: {exc}"
 
     return {
         "message_id": msg_id,
         "total_atoms": total_atoms,
         "received_atoms": len(atoms),
         "gist": gist,
-        "mckay": mckay_gist,
+        "compression": compression_gist,
         "complete": complete,
         "recovered_fraction": recovered_fraction,
         "message": message,
         "data": decompressed,
         "integrity_ok": integrity,
         "command_authenticated": _command_auth_state(message),
+        **({"error": decode_error} if decode_error else {}),
     }
 
 
@@ -792,26 +837,26 @@ def pack_message_sp(
     counter : SpacePacketSequenceCounter
         Sequence counter; advanced once per call.
     message_id : int, optional
-        ASTRAL message ID (16-bit). Generated randomly if omitted.
+        GistLink message ID (16-bit). Generated randomly if omitted.
     extra_fountain : int
         Extra fountain redundancy packets.
 
     Returns
     -------
     bytes
-        Complete CCSDS Space Packet (6-byte header + ASTRAL atom stream).
+        Complete CCSDS Space Packet (6-byte header + GistLink atom stream).
     """
     from .spacepacket import SpacePacketSequenceCounter, wrap as _sp_wrap  # noqa: F401
 
-    astral_stream = pack_message(
+    gistlink_stream = pack_message(
         msg, message_id=message_id, extra_fountain=extra_fountain
     )
-    return _sp_wrap(astral_stream, msg["type"], counter)
+    return _sp_wrap(gistlink_stream, msg["type"], counter)
 
 
 def unpack_stream_sp(packet: bytes) -> dict:
     """
-    Unwrap a CCSDS Space Packet and decode the enclosed ASTRAL stream.
+    Unwrap a CCSDS Space Packet and decode the enclosed GistLink stream.
 
     Parameters
     ----------
@@ -823,7 +868,7 @@ def unpack_stream_sp(packet: bytes) -> dict:
     -------
     dict
         A merged dict with Space Packet header fields and the decoded
-        ASTRAL payload::
+        GistLink payload::
 
             {
                 "apid":             int,
@@ -841,7 +886,7 @@ def unpack_stream_sp(packet: bytes) -> dict:
             }
 
     The function never raises — if the Space Packet header is invalid it
-    returns ``{"error": "<reason>"}``; if ASTRAL decoding fails the
+    returns ``{"error": "<reason>"}``; if GistLink decoding fails the
     ``unpack_stream`` error key is preserved.
     """
     from .spacepacket import unwrap as _sp_unwrap
@@ -850,13 +895,13 @@ def unpack_stream_sp(packet: bytes) -> dict:
         sp = _sp_unwrap(packet)
     except (ValueError, struct.error) as exc:
         return {"error": f"space packet parse error: {exc}"}
-    astral_result = unpack_stream(sp["astral_stream"])
+    decoded = unpack_stream(sp["gistlink_stream"])
     return {
         "apid": sp["apid"],
         "packet_type": sp["packet_type"],
         "seq_count": sp["seq_count"],
         "msg_type": sp["msg_type"],
-        **astral_result,
+        **decoded,
     }
 
 
@@ -874,7 +919,7 @@ def pack_message_rs(
     msg : dict
         Message dict with at least a ``type`` key.
     message_id : int, optional
-        ASTRAL message ID. Generated randomly if omitted.
+        GistLink message ID. Generated randomly if omitted.
     extra_fountain : int
         Extra fountain redundancy packets.
     e : int
@@ -889,10 +934,10 @@ def pack_message_rs(
     """
     from .rs_fec import encode_stream as _rs_encode
 
-    astral_stream = pack_message(
+    gistlink_stream = pack_message(
         msg, message_id=message_id, extra_fountain=extra_fountain
     )
-    return _rs_encode(astral_stream, e=e)
+    return _rs_encode(gistlink_stream, e=e)
 
 
 def unpack_stream_rs(rs_stream: bytes, e: int = 16) -> dict:
@@ -900,7 +945,7 @@ def unpack_stream_rs(rs_stream: bytes, e: int = 16) -> dict:
     Decode an RS-protected stream produced by ``pack_message_rs``.
 
     Corrects bit errors, drops uncorrectable atoms (the fountain code
-    recovers from the resulting erasures), then decodes the ASTRAL payload.
+    recovers from the resulting erasures), then decodes the GistLink payload.
 
     Parameters
     ----------
@@ -928,16 +973,16 @@ def unpack_stream_rs(rs_stream: bytes, e: int = 16) -> dict:
     from .rs_fec import decode_stream as _rs_decode
 
     try:
-        astral_stream, n_corrected, n_uncorrectable = _rs_decode(rs_stream, e=e)
+        gistlink_stream, n_corrected, n_uncorrectable = _rs_decode(rs_stream, e=e)
     except (TypeError, ValueError) as exc:
         return {"error": f"rs decode error: {exc}", "rs_e": e}
 
-    astral_result = unpack_stream(astral_stream)
+    decoded = unpack_stream(gistlink_stream)
     return {
         "rs_e": e,
         "rs_corrected_symbols": n_corrected,
         "rs_uncorrectable_atoms": n_uncorrectable,
-        **astral_result,
+        **decoded,
     }
 
 
@@ -962,7 +1007,7 @@ def pack_message_tm(
     vcid : int
         Virtual Channel ID (3-bit, 0-7). Default 0.
     message_id : int, optional
-        ASTRAL message ID. Generated randomly if omitted.
+        GistLink message ID. Generated randomly if omitted.
     extra_fountain : int
         Extra fountain redundancy packets.
     randomise : bool
@@ -978,11 +1023,11 @@ def pack_message_tm(
     """
     from .tmframe import encode_frames as _tm_encode
 
-    astral_stream = pack_message(
+    gistlink_stream = pack_message(
         msg, message_id=message_id, extra_fountain=extra_fountain
     )
     return _tm_encode(
-        astral_stream,
+        gistlink_stream,
         scid=scid,
         vcid=vcid,
         counter=counter,
@@ -996,7 +1041,7 @@ def unpack_frames_tm(
     randomise: bool = True,
 ) -> dict:
     """
-    Decode TM Transfer Frames and recover the enclosed ASTRAL stream.
+    Decode TM Transfer Frames and recover the enclosed GistLink stream.
 
     Frames with CRC errors are dropped; the fountain code recovers from
     the resulting atom erasures.
@@ -1008,7 +1053,7 @@ def unpack_frames_tm(
     original_length : int, optional
         If provided, trim the recovered data field to this many bytes before
         passing to ``unpack_stream``. Useful when the caller knows the exact
-        ASTRAL stream length. If omitted, the full concatenated data fields
+        GistLink stream length. If omitted, the full concatenated data fields
         (including any fill bytes) are passed to ``unpack_stream``.
     randomise : bool
         Must match the value used during encoding. Default True.
@@ -1041,9 +1086,9 @@ def unpack_frames_tm(
 
     if original_length is not None:
         data = data[:original_length]
-    astral_result = unpack_stream(data)
+    decoded = unpack_stream(data)
     return {
         "tm_n_frames": stats["n_frames"],
         "tm_n_crc_errors": stats["n_crc_errors"],
-        **astral_result,
+        **decoded,
     }

@@ -1,7 +1,7 @@
 """
 Compact satellite command encoding with HMAC-SHA256 authentication.
 
-Commanding is the one place in ASTRAL where getting it wrong is dangerous, so
+Commanding is the one place in GistLink where getting it wrong is dangerous, so
 the API is built to fail closed:
 
 * ``decode_cmd`` verifies by default. Without a key, or with a key that does
@@ -13,15 +13,21 @@ the API is built to fail closed:
   that is absent and conclude the command was trustworthy.
 * :class:`ReplayGuard` rejects a replayed or reordered counter. An
   authenticated command is not a fresh command; without a guard, an attacker
-  who records a valid BURN can send it again.
+  who records a valid BURN can send it again. Use
+  :class:`PersistentReplayGuard` for anything that commands real hardware:
+  the in-memory guard forgets everything when the receiver restarts.
 
 Stdlib only.
 """
 
 from __future__ import annotations
 
-import hmac
 import hashlib
+import hmac
+import json
+import os
+import tempfile
+
 from .varint import leb128_encode, leb128_decode
 
 # 4-byte counter + 32-byte HMAC-SHA256
@@ -40,6 +46,11 @@ class ReplayGuard:
     One guard per uplink key. Counters are 32 bits; the guard refuses to wrap,
     because a wrapped counter is indistinguishable from a replay. Rekey before
     4 billion commands.
+
+    This base class keeps its state in memory only, so it protects a single
+    run of a single process. A receiver that restarts starts over at -1 and
+    will accept a command it has already executed. For anything commanding
+    real hardware use :class:`PersistentReplayGuard`.
     """
 
     __slots__ = ("_last",)
@@ -53,6 +64,10 @@ class ReplayGuard:
 
     def validate(self, counter: int) -> None:
         """Raise CommandAuthError unless ``counter`` is newer than the last."""
+        self._check(counter)
+        self._commit(counter)
+
+    def _check(self, counter) -> None:
         if counter is None:
             raise CommandAuthError("command carries no counter to check")
         if counter <= self._last:
@@ -60,7 +75,152 @@ class ReplayGuard:
                 f"replayed or out-of-order command: counter {counter} is not "
                 f"newer than the last accepted counter {self._last}"
             )
+
+    def _commit(self, counter: int) -> None:
         self._last = counter
+
+
+class ReplayStateError(CommandAuthError):
+    """Raised when the persisted replay state cannot be read or written."""
+
+
+class PersistentReplayGuard(ReplayGuard):
+    """
+    A :class:`ReplayGuard` whose high-water mark survives a restart.
+
+    The counter is written durably **before** the command is accepted, so a
+    crash cannot leave a command executed but its counter unrecorded. The
+    trade-off runs the safe way: a crash between the write and acting on the
+    command burns that counter, and the sender has to reissue with a new one.
+    Losing a command is recoverable; executing one twice may not be.
+
+    ``path`` holds JSON mapping a link id to its last accepted counter, so one
+    file can serve several uplinks::
+
+        guard = PersistentReplayGuard("/var/lib/gistlink/uplink.json", "sat-1")
+
+    A missing file means a first run and starts at -1. A file that exists but
+    cannot be parsed is an error rather than a silent reset, because silently
+    resetting is exactly the failure this class exists to prevent. Deleting
+    the file disables replay protection; treat it as security state.
+
+    Assumes a single writer. Two processes guarding the same link with the
+    same file will race.
+    """
+
+    __slots__ = ("_path", "_link_id")
+
+    FORMAT_VERSION = 1
+
+    def __init__(
+        self,
+        path,
+        link_id: str = "default",
+        require_existing: bool = False,
+    ) -> None:
+        self._path = os.fspath(path)
+        self._link_id = str(link_id)
+        super().__init__(self._load(require_existing))
+
+    @property
+    def path(self) -> str:
+        return self._path
+
+    @property
+    def link_id(self) -> str:
+        return self._link_id
+
+    def _read_state(self) -> dict:
+        try:
+            with open(self._path, "r", encoding="utf-8") as handle:
+                state = json.load(handle)
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError) as exc:
+            raise ReplayStateError(
+                f"replay state at {self._path!r} is unreadable ({exc}). "
+                f"Refusing to accept commands: starting from scratch here "
+                f"would re-open the replay window. Restore the file from "
+                f"backup, or recreate it deliberately with the last counter "
+                f"you know was accepted."
+            ) from exc
+        if not isinstance(state, dict) or "links" not in state:
+            raise ReplayStateError(
+                f"replay state at {self._path!r} is not an GistLink replay "
+                f"state file"
+            )
+        return state
+
+    def _load(self, require_existing: bool) -> int:
+        state = self._read_state()
+        if not state:
+            if require_existing:
+                raise ReplayStateError(
+                    f"no replay state at {self._path!r} and require_existing "
+                    f"is set"
+                )
+            return -1
+        links = state.get("links", {})
+        if not isinstance(links, dict):
+            raise ReplayStateError(f"replay state at {self._path!r} is malformed")
+        value = links.get(self._link_id, -1)
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise ReplayStateError(
+                f"replay state for link {self._link_id!r} is not an integer"
+            )
+        return value
+
+    def _commit(self, counter: int) -> None:
+        state = self._read_state() or {"version": self.FORMAT_VERSION, "links": {}}
+        state.setdefault("version", self.FORMAT_VERSION)
+        state.setdefault("links", {})[self._link_id] = counter
+        self._write_atomic(state)
+        # Only now is the command accepted in memory.
+        super()._commit(counter)
+
+    def _write_atomic(self, state: dict) -> None:
+        """Write the whole file via a temporary file and a rename."""
+        directory = os.path.dirname(os.path.abspath(self._path)) or "."
+        try:
+            os.makedirs(directory, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(
+                dir=directory, prefix=".gistlink-replay-", suffix=".tmp"
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    json.dump(state, handle, sort_keys=True)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(tmp, self._path)
+            except BaseException:
+                # Never leave a stray temporary file behind on failure.
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
+            self._fsync_directory(directory)
+        except OSError as exc:
+            raise ReplayStateError(
+                f"could not record the command counter at {self._path!r} "
+                f"({exc}). Refusing the command: accepting it without a "
+                f"durable record would allow it to be replayed after a "
+                f"restart."
+            ) from exc
+
+    @staticmethod
+    def _fsync_directory(directory: str) -> None:
+        """Make the rename itself durable. Not supported on Windows."""
+        try:
+            fd = os.open(directory, os.O_RDONLY)
+        except OSError:
+            return
+        try:
+            os.fsync(fd)
+        except OSError:
+            pass
+        finally:
+            os.close(fd)
 
 
 class CommandSequencer:
@@ -122,7 +282,27 @@ def _verify_trailer(
     return out
 
 
+def _check_key(key) -> None:
+    """
+    An empty key is a configuration error, not a way to opt out.
+
+    `key=b""` is falsy, so every `if key:` in this module treated it as "no
+    key at all": signing was skipped and verification bypassed while the
+    caller believed they had supplied one. Failing closed means refusing it.
+    """
+    if key is None:
+        return
+    if not isinstance(key, bytes):
+        raise ValueError("key must be bytes or None")
+    if not key:
+        raise ValueError(
+            "key is empty; pass a real key, or None to opt out of "
+            "authentication explicitly"
+        )
+
+
 def _require_key(key, require_auth: bool, what: str) -> None:
+    _check_key(key)
     if key is None and require_auth:
         raise CommandAuthError(
             f"refusing to return an unverified {what}: pass key= to "
@@ -197,6 +377,7 @@ def encode_cmd(
     elif name == "APPLY_UPDATE":
         pass
 
+    _check_key(key)
     if key:
         if not 0 <= counter <= COUNTER_MAX:
             raise ValueError(f"counter must be 0..{COUNTER_MAX}, got {counter}")
@@ -324,6 +505,7 @@ def encode_cmd_batch(
         body = encode_cmd(cmd, key=None)  # type: ignore
         out += leb128_encode(len(body))
         out += body
+    _check_key(key)
     if key:
         if not 0 <= counter <= COUNTER_MAX:
             raise ValueError(f"counter must be 0..{COUNTER_MAX}, got {counter}")

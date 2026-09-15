@@ -1,6 +1,6 @@
 import random
 
-from astral.codec import header_redundancy_for, pack_message, unpack_stream
+from gistlink.codec import header_redundancy_for, pack_message, unpack_stream
 
 
 def test_roundtrip():
