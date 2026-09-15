@@ -46,16 +46,30 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: pytest tests/ -v --tb=short
 
-      - name: Verify the Rust extension is actually exercised
+      - name: Verify the Rust extension actually works
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python -c "
+          import struct
           import gistlink_native as ac
-          from gistlink import compress as mk
+          from gistlink import compress as engine
           assert hasattr(ac, 'compress_text'), 'extension built but not importable'
-          assert mk._RUST_AVAILABLE, 'Rust fast path not selected'
-          print('Rust extension active')
+          assert engine._RUST_AVAILABLE, 'Rust fast path not selected'
+
+          # Importable is not the same as working. Exercise every entry point:
+          # a silently broken accelerator that falls back to Python passes
+          # every other test in this suite, and reading 'falling back' in a
+          # log is not enough to tell a fault from a designed fallback.
+          text = b'satellite telemetry nominal battery ' * 40
+          assert ac.decompress_text(ac.compress_text(text)) == text
+
+          raw = struct.pack('>400f', *[i * 0.25 for i in range(400)])
+          assert ac.decompress_binary_float(ac.compress_binary_float(raw), len(raw)) == raw
+
+          out = ac.decompress_telemetry(ac.compress_telemetry(raw, 4), len(raw), 4)
+          assert len(out) == len(raw)
+          print('Rust extension active and round-tripping')
           "
 
       - name: Run the worked examples

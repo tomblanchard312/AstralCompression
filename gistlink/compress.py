@@ -144,6 +144,15 @@ def _detect_type(data: bytes) -> str:
 ABBREV_MARKER = b""
 
 
+def _is_utf8(data: bytes) -> bool:
+    """Whether the abbreviation transforms can read this at all."""
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
 def _abbreviation_is_safe(data: bytes) -> bool:
     """
     Whether abbreviation coding can be reversed for this input.
@@ -161,12 +170,19 @@ def _abbreviation_is_safe(data: bytes) -> bool:
 
 def _compress_text(data: bytes) -> tuple[int, int, bytes]:
     """Returns (transform_id, entropy_coder, payload_bytes)."""
-    if _rust_has("compress_text") and _abbreviation_is_safe(data):
+    if _rust_has("compress_text") and _abbreviation_is_safe(data) and _is_utf8(data):
         try:
             return TRANSFORM_TEXT, ENTROPY_ZSTD, _ac.compress_text(data)
-        except Exception:
+        except Exception as exc:
+            # Reaching here means the extension refused input it should have
+            # handled, which is worth reporting. Inputs it legitimately cannot
+            # represent are filtered above, because warning "Rust compression
+            # failed" for those reads as a broken accelerator and sends
+            # whoever is holding the log down the wrong path.
             warnings.warn(
-                "Rust text compression failed, falling back to Python", UserWarning
+                f"Rust text compression failed on valid input, falling back "
+                f"to Python: {exc}",
+                UserWarning,
             )
 
     # The transform id must record whether abbreviation coding was actually
@@ -356,12 +372,22 @@ def _decompress_telemetry(
     payload_bytes: bytes, original_length: int, channels: int, entropy_coder: int
 ) -> bytes:
     """Inverse of _compress_telemetry."""
-    if _rust_has("decompress_telemetry") and entropy_coder == ENTROPY_ZSTD:
+    shape_ok = (
+        original_length % 4 == 0
+        and channels >= 1
+        and (original_length // 4) % channels == 0
+    )
+    if (
+        _rust_has("decompress_telemetry")
+        and entropy_coder == ENTROPY_ZSTD
+        and shape_ok
+    ):
         try:
             return _ac.decompress_telemetry(payload_bytes, original_length, channels)
-        except Exception:
+        except Exception as exc:
             warnings.warn(
-                "Rust telemetry decompression failed, falling back to Python",
+                f"Rust telemetry decompression failed on a well-formed "
+                f"stream, falling back to Python: {exc}",
                 UserWarning,
             )
 

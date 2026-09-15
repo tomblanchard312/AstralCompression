@@ -156,7 +156,8 @@ Read these before relying on it.
    builds and verifies the package before publishing, but no release has been
    cut, so the first `pip install gistlink` from PyPI will be the first real
    test of it.
-10. **The Rust extension is not published as a wheel.** Build it with
+10. **The Rust extension is not published as a wheel.** It is built and
+    round-trip verified in CI, so the fast path works where it is built. Build it with
    `maturin build --release` in `gistlink_native/`. The pure Python path is
    the supported one.
 

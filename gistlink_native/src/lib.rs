@@ -4,6 +4,9 @@ use pyo3::types::PyBytes;
 use pyo3::Py;
 use zstd;
 
+/// The abbreviation marker byte, shared with the Python implementation.
+const ABBREV_MARKER: u8 = 0x1e;
+
 /// Compress telemetry data using Q12 quantization and delta encoding with zstd compression
 #[pyfunction]
 #[pyo3(signature = (data, channels))]
@@ -218,6 +221,17 @@ fn decompress_binary_float(py: Python, payload_bytes: &[u8], original_length: us
 fn compress_text(py: Python, data: &[u8]) -> PyResult<Py<PyBytes>> {
     let text = std::str::from_utf8(data)
         .map_err(|e| PyValueError::new_err(format!("Invalid UTF-8: {}", e)))?;
+
+    // Abbreviation coding is not injective: the decoder rewrites any marker
+    // followed by two hex digits and a case digit back into a word, so text
+    // that already contains that sequence would come back with words
+    // substituted into it. Refuse such input rather than corrupt it; the
+    // caller falls back to a transform that can represent it.
+    if data.contains(&ABBREV_MARKER) {
+        return Err(PyValueError::new_err(
+            "input contains the abbreviation marker (0x1E) and cannot be abbreviation-coded reversibly",
+        ));
+    }
     
     // Abbreviation mapping (same as Python)
     let abbrevs: std::collections::HashMap<&str, &str> = [

@@ -50,6 +50,19 @@ old names, so shims would be dead weight from the first release.
 - `GISTLINK_DICT` environment variable: name a dictionary once and every pack
   and unpack uses it, instead of threading `--dict` through every call.
 
+### Fixed (native extension)
+- **The Rust text compressor shared the abbreviation bug** and would corrupt
+  marker-bearing text if called directly. It now refuses such input, so the
+  function is safe standalone and not only behind the Python guard.
+- **Fallback warnings no longer cry wolf.** "Rust text compression failed"
+  fired whenever the extension was handed input it legitimately cannot
+  represent (non-UTF-8 text, a deliberately malformed stream), which reads as
+  a broken accelerator. Those inputs are now filtered before the call, so a
+  warning means something genuinely unexpected, and it names the error.
+- CI verifies the extension **round-trips** rather than merely imports. A
+  silently broken accelerator passes every other test in the suite, because
+  the Python fallback covers for it.
+
 ### Fixed (release process)
 - **The release workflow never built the package it releases.** It ran maturin
   in `gistlink_native/` and published only that, so a release would have

@@ -1566,3 +1566,74 @@ class TestReleaseWorkflow:
         )
         assert "twine check" in runs
         assert "unpack_compressed_stream" in runs, "the wheel is not smoke-tested"
+
+
+class TestNativeExtension:
+    """
+    The extension was reported (by me) as broken because the logs carried
+    "Rust text compression failed, falling back to Python". It was not broken:
+    that warning fired on inputs the extension legitimately cannot represent,
+    and the fallback was working exactly as designed. A warning that reads as
+    a fault when nothing is at fault costs someone an afternoon, so the
+    warnings now fire only on genuine failures, and these tests pin both the
+    behaviour and the quiet.
+    """
+
+    @pytest.fixture
+    def native(self):
+        if not compress._RUST_AVAILABLE:
+            pytest.skip("requires the built extension (pip install gistlink[fast])")
+        return compress._ac
+
+    def test_native_refuses_marker_bearing_text(self, native):
+        """
+        Abbreviation coding is not injective, and the extension shares the
+        Python implementation's exposure. Python gates it, but the function
+        must be safe on its own for anyone calling it directly.
+        """
+        with pytest.raises(Exception):
+            native.compress_text(("\x1e001 literal marker " * 40).encode())
+
+    def test_native_roundtrips_text(self, native):
+        data = ("satellite telemetry nominal battery attitude " * 40).encode()
+        assert native.decompress_text(native.compress_text(data)) == data
+
+    def test_native_roundtrips_binary_float(self, native):
+        raw = struct.pack(">400f", *[i * 0.25 for i in range(400)])
+        assert native.decompress_binary_float(
+            native.compress_binary_float(raw), len(raw)
+        ) == raw
+
+    def test_native_telemetry_stays_within_the_quantiser_bound(self, native):
+        vals = [math.sin(t / 30.0) * 10 for t in range(800)]
+        raw = struct.pack(f">{len(vals)}f", *vals)
+        out = native.decompress_telemetry(native.compress_telemetry(raw, 4), len(raw), 4)
+        got = struct.unpack(f">{len(vals)}f", out)
+        assert max(abs(a - b) for a, b in zip(vals, got)) < 1e-2
+
+    def test_no_warning_for_input_the_extension_cannot_represent(self):
+        """
+        Non-UTF-8 and marker-bearing text are handled by the Python path by
+        design. Warning about them advertises a fault that does not exist.
+        """
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            for data in (b"\xff\xfe\x00binary" * 40,
+                         ("\x1e001 marker " * 40).encode(),
+                         ("satellite telemetry nominal " * 50).encode()):
+                assert compress.decompress(compress.compress(data, "TEXT")) == data
+        assert [str(w.message) for w in caught] == []
+
+    def test_no_warning_for_a_deliberately_malformed_telemetry_stream(self):
+        """
+        The shape is checkable up front, so a stream that cannot be valid is
+        not handed to the extension and cannot be blamed on it.
+        """
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            # The entropy coder raises its own type here; what this test is
+            # about is that the extension is not blamed for it.
+            with pytest.raises(Exception):
+                compress._decompress_telemetry(b"garbage", 0xFFFF, 1,
+                                               compress.ENTROPY_ZSTD)
+        assert not [w for w in caught if "Rust" in str(w.message)]
