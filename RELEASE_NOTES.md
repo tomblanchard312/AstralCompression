@@ -1,12 +1,12 @@
 # GistLink 2.0.0
 
-Formerly ASTRAL. The project and its compression engine are renamed to say
-what they do; see the CHANGELOG for the full list of moved names. The only
-wire-format change is the two magic bytes of the compressed container.
+Formerly ASTRAL. The project and its compression engine are renamed to say what
+they do; the CHANGELOG lists every moved name. The only wire-format change is
+the two magic bytes of the compressed container, and nothing had been published
+under the old ones.
 
-
-First release with a specified wire format, frozen test vectors, and a
-security review of the command path.
+This is the first release with a specified wire format, frozen test vectors, a
+security review of the command path, and mission dictionaries.
 
 ## What this release is for
 
@@ -23,7 +23,7 @@ research, and payload software on a Linux-class board.
 with no software assurance regime behind it, and no flight heritage. See
 "Scope and limits" below before designing it into anything that flies.
 
-## New in 1.1.0
+## Mission dictionaries
 
 **Mission dictionaries.** A trained zstd dictionary beats every built-in
 transform on short messages, which is the traffic this format exists for:
