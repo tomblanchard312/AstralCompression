@@ -1,8 +1,8 @@
 # Rust / Cargo build artifacts
-astral_compress/target/
-astral_compress/Cargo.lock
+gistlink_native/target/
+gistlink_native/Cargo.lock
 
-# 🇨🇦 McKay + ASTRAL Project .gitignore
+# GistLink .gitignore
 
 # Python
 __pycache__/
@@ -90,36 +90,32 @@ results/
 *.out
 *.result
 
-# McKay compression artifacts
-*.mckay
+# GistLink compressed artifacts
+*.gistlink
 *.compressed
 *.decompressed
 
-# ASTRAL fountain code artifacts
+# Fountain code artifacts
 *.fountain
 *.atomized
 *.gist
 
 # System files
-.DS_Store
 .DS_Store?
 ._*
 .Spotlight-V100
 .Trashes
 ehthumbs.db
-Thumbs.db
 
 # Windows
 *.lnk
 
 # Linux
-*~
 
 # macOS
 .AppleDouble
 .LSOverride
 Icon
-._*
 
 # Project-specific
 enhanced_fixed.wav
@@ -132,3 +128,6 @@ temp_*
 act.exe
 act.zip
 act-tool/
+
+# Rust build output. 2,074 of these were tracked, which buried every real
+# change in the diff and grew the repository for no benefit.
