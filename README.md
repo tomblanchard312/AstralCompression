@@ -257,7 +257,7 @@ its contents otherwise:
 
 ```python
 from astral import unpack_stream
-from astral.commands import CommandSequencer, ReplayGuard
+from astral.commands import CommandSequencer, PersistentReplayGuard
 
 # Sender: a counter that always increases.
 seq = CommandSequencer()
@@ -266,10 +266,23 @@ stream = pack_cmd_message(
     key=KEY, counter=seq.next(),
 )
 
-# Receiver: one guard per uplink key, kept across contacts.
-guard = ReplayGuard()
+# Receiver: one guard per uplink key, on disk so it survives a restart.
+guard = PersistentReplayGuard("/var/lib/astral/uplink.json", "sat-1")
 result = unpack_stream(stream, key=KEY, replay_guard=guard)
 result["command_authenticated"]   # True, False, or None if not a command
+```
+
+Use `PersistentReplayGuard` for anything commanding real hardware. The
+in-memory `ReplayGuard` protects only a single run: a receiver that restarts
+begins again at -1 and will accept a command it has already executed. The
+persistent guard writes the counter durably **before** accepting the command,
+so a crash can lose a command but never execute one twice, and it refuses to
+run on a state file it cannot parse rather than silently reopening the window.
+
+From the command line:
+
+```bash
+astral unpack cmd.bin --key $KEY --replay-state /var/lib/astral/uplink.json --link-id sat-1
 ```
 
 A command that fails its HMAC, arrives without one, or repeats a counter the
@@ -416,7 +429,7 @@ reports per-dataset timings, ratios and an average speedup.
 
 ```bash
 pip install pytest reedsolo numpy
-python -m pytest tests            # 264 passed, 19 skipped without the Rust extension
+python -m pytest tests            # 274 passed, 19 skipped without the Rust extension
 python -m flake8 astral/ tests/ *.py --config=setup.cfg
 ```
 

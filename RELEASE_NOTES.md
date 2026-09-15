@@ -33,8 +33,10 @@ independent construction, and Berlekamp's dual basis is supported and used by
 default as the standard specifies.
 
 **Commanding fails closed.** Decoding a command verifies it by default and
-refuses to return its contents otherwise. A `ReplayGuard` rejects replayed or
-reordered counters. `unpack_stream` accepts a key and reports
+refuses to return its contents otherwise. `PersistentReplayGuard` rejects
+replayed or reordered counters and keeps its high-water mark on disk, written
+durably before the command is accepted, so replay protection survives a
+receiver restart. `unpack_stream` accepts a key and reports
 `command_authenticated`; without one, commands are tagged
 `authenticated: False` and the CLI warns on stderr.
 
@@ -81,7 +83,7 @@ Python 3.9 through 3.13, tested on the 3.9-3.12 matrix in CI.
 
 ## Verification
 
-* 264 tests pass, 19 skip without optional extras; the suite also passes with
+* 274 tests pass, 19 skip without optional extras; the suite also passes with
   every extra absent.
 * Lint clean across the package, tests and benchmarks.
 * The decoder was fuzzed with 4,000 hostile inputs (random bytes, bit-flipped
@@ -113,8 +115,13 @@ Read these before relying on it.
    `header_redundancy_for(0.8)` returns 21 copies for 99% survival at 80% loss.
 6. **CRC-32 and CRC-8 detect noise, not tampering.** HMAC on commands is the
    only authentication in the format, and there is no confidentiality at all.
-7. **Voice needs `pycodec2`**, and those paths are not exercised in CI.
-8. **The Rust extension is not published as a wheel.** Build it with
+   The HMAC construction has not been reviewed by a third party.
+7. **Replay state is a single-writer file.** `PersistentReplayGuard` assumes
+   one process per link; two guarding the same link with the same file will
+   race. Treat the state file as security state: deleting it disables replay
+   protection.
+8. **Voice needs `pycodec2`**, and those paths are not exercised in CI.
+9. **The Rust extension is not published as a wheel.** Build it with
    `maturin build --release` in `astral_compress/`. The pure Python path is
    the supported one.
 

@@ -20,6 +20,7 @@ from .spacepacket import (
     APID_MAP,
     wrap as sp_wrap,
 )
+from .commands import PersistentReplayGuard
 from .voice import decode_bitstream_to_wav
 
 
@@ -84,7 +85,16 @@ def cmd_unpack(args):
     try:
         stream = read_bin(args.input)
         key = bytes.fromhex(args.key) if getattr(args, "key", None) else None
-        result = unpack_stream(stream, key=key)
+        guard = None
+        if getattr(args, "replay_state", None):
+            guard = PersistentReplayGuard(args.replay_state, args.link_id)
+        elif key is not None:
+            print(
+                "WARNING: no --replay-state given, so a command already "
+                "received will be accepted again after a restart.",
+                file=sys.stderr,
+            )
+        result = unpack_stream(stream, key=key, replay_guard=guard)
         if result.get("command_authenticated") is False and key is None:
             print(
                 "WARNING: this is a command and no --key was given, so it is "
@@ -427,6 +437,20 @@ def main(argv=None):
         "--key",
         default=None,
         help="hex HMAC key; required to authenticate a CMD or CMD_BATCH",
+    )
+    p_unpack.add_argument(
+        "--replay-state",
+        default=None,
+        metavar="PATH",
+        help=(
+            "file holding the last accepted command counter; required for "
+            "replay protection to survive a restart"
+        ),
+    )
+    p_unpack.add_argument(
+        "--link-id",
+        default="default",
+        help="which uplink inside the replay state file (default: default)",
     )
     p_unpack.set_defaults(func=cmd_unpack)
 

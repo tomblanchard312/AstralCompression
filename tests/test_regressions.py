@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import random
 import struct
 import warnings
@@ -946,3 +947,143 @@ class TestCommandAuthentication:
         assert out["items"][0]["cmd"]["duration_ms"] == 12500
         with pytest.raises(CommandAuthError):
             decode_cmd_batch(encode_cmd_batch(batch), key=self.KEY)
+
+
+class TestPersistentReplayGuard:
+    """
+    The in-memory guard forgets everything when the receiver restarts, so a
+    recorded BURN could be replayed after a process bounce. The persistent
+    guard keeps the high-water mark on disk.
+    """
+
+    KEY = b"k" * 16
+    BURN = {"name": "BURN", "thruster_id": 1, "duration_ms": 12500}
+
+    def _signed(self, counter):
+        from astral.commands import encode_cmd
+
+        return encode_cmd(self.BURN, key=self.KEY, counter=counter)
+
+    def test_survives_a_restart(self, tmp_path):
+        from astral.commands import (
+            CommandAuthError,
+            PersistentReplayGuard,
+            decode_cmd,
+        )
+
+        path = tmp_path / "uplink.json"
+        blob = self._signed(7)
+        decode_cmd(blob, key=self.KEY, replay_guard=PersistentReplayGuard(path))
+        # A brand new guard object stands in for a restarted receiver.
+        with pytest.raises(CommandAuthError, match="replayed"):
+            decode_cmd(blob, key=self.KEY, replay_guard=PersistentReplayGuard(path))
+
+    def test_in_memory_guard_does_not_survive_a_restart(self):
+        """Documents why the persistent one exists."""
+        from astral.commands import ReplayGuard, decode_cmd
+
+        blob = self._signed(7)
+        decode_cmd(blob, key=self.KEY, replay_guard=ReplayGuard())
+        # Same bytes, new guard: accepted, which is the hazard.
+        out = decode_cmd(blob, key=self.KEY, replay_guard=ReplayGuard())
+        assert out["authenticated"] is True
+
+    def test_counter_is_durable_before_the_command_is_accepted(self, tmp_path):
+        """
+        A crash must not leave a command executed but unrecorded, so the write
+        happens first. The file already holds the counter by the time validate
+        returns.
+        """
+        import json
+
+        from astral.commands import PersistentReplayGuard
+
+        path = tmp_path / "uplink.json"
+        guard = PersistentReplayGuard(path, "sat-1")
+        guard.validate(11)
+        assert json.loads(path.read_text())["links"]["sat-1"] == 11
+
+    def test_links_are_independent(self, tmp_path):
+        from astral.commands import PersistentReplayGuard
+
+        path = tmp_path / "uplink.json"
+        PersistentReplayGuard(path, "sat-1").validate(5)
+        assert PersistentReplayGuard(path, "sat-2").last_accepted == -1
+        assert PersistentReplayGuard(path, "sat-1").last_accepted == 5
+
+    def test_corrupt_state_is_refused_not_silently_reset(self, tmp_path):
+        from astral.commands import PersistentReplayGuard, ReplayStateError
+
+        path = tmp_path / "uplink.json"
+        PersistentReplayGuard(path).validate(3)
+        path.write_text("{ this is not json")
+        with pytest.raises(ReplayStateError):
+            PersistentReplayGuard(path)
+
+    def test_missing_state_is_a_first_run(self, tmp_path):
+        from astral.commands import PersistentReplayGuard, ReplayStateError
+
+        path = tmp_path / "does-not-exist.json"
+        assert PersistentReplayGuard(path).last_accepted == -1
+        with pytest.raises(ReplayStateError):
+            PersistentReplayGuard(path, require_existing=True)
+
+    def test_rejected_command_does_not_advance_persisted_state(self, tmp_path):
+        import json
+
+        from astral.commands import CommandAuthError, PersistentReplayGuard, decode_cmd
+
+        path = tmp_path / "uplink.json"
+        guard = PersistentReplayGuard(path)
+        decode_cmd(self._signed(9), key=self.KEY, replay_guard=guard)
+        with pytest.raises(CommandAuthError):
+            decode_cmd(self._signed(4), key=self.KEY, replay_guard=guard)
+        assert json.loads(path.read_text())["links"]["default"] == 9
+
+    def test_unwritable_state_refuses_the_command(self, tmp_path, monkeypatch):
+        """If the counter cannot be recorded, the command must not be accepted."""
+        from astral.commands import PersistentReplayGuard, ReplayStateError
+
+        guard = PersistentReplayGuard(tmp_path / "uplink.json")
+
+        def boom(*args, **kwargs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr("astral.commands.tempfile.mkstemp", boom)
+        with pytest.raises(ReplayStateError, match="could not record"):
+            guard.validate(1)
+        assert guard.last_accepted == -1  # not accepted in memory either
+
+    def test_no_temporary_files_left_behind(self, tmp_path, monkeypatch):
+        from astral.commands import PersistentReplayGuard, ReplayStateError
+
+        path = tmp_path / "uplink.json"
+        guard = PersistentReplayGuard(path)
+        guard.validate(1)
+
+        real_replace = os.replace
+
+        def failing_replace(src, dst):
+            raise OSError("interrupted")
+
+        monkeypatch.setattr("astral.commands.os.replace", failing_replace)
+        with pytest.raises(ReplayStateError):
+            guard.validate(2)
+        monkeypatch.setattr("astral.commands.os.replace", real_replace)
+        leftovers = list(tmp_path.glob(".astral-replay-*"))
+        assert leftovers == []
+
+    def test_end_to_end_through_unpack_stream(self, tmp_path):
+        from astral.commands import PersistentReplayGuard
+
+        path = tmp_path / "uplink.json"
+        stream = codec.pack_cmd_message(self.BURN, key=self.KEY, counter=2)
+        first = codec.unpack_stream(
+            stream, key=self.KEY, replay_guard=PersistentReplayGuard(path)
+        )
+        assert first["command_authenticated"] is True
+        second = codec.unpack_stream(
+            stream, key=self.KEY, replay_guard=PersistentReplayGuard(path)
+        )
+        assert second["command_authenticated"] is False
+        assert "replayed" in second["error"]

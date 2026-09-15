@@ -28,6 +28,13 @@ table and scope limits.
   counterpart.
 
 ### Added
+- `PersistentReplayGuard`: replay protection that survives a receiver
+  restart. The in-memory `ReplayGuard` reset to accepting everything when the
+  process bounced, which left the replay window open in exactly the situation
+  it was meant to close. The counter is written atomically and fsynced before
+  the command is accepted, so a crash can lose a command but never execute one
+  twice; an unreadable state file is an error rather than a silent reset; and
+  the CLI gained `--replay-state` and `--link-id`.
 - `docs/FORMAT.md`: the wire format specification, complete enough for an
   independent implementation.
 - `tests/test_vectors.py`: frozen wire-format vectors, with provenance noted

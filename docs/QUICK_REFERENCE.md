@@ -83,6 +83,22 @@ data, corrected, ok = rs_fec.decode_codeblock(block)
 | 60% | 10 |
 | 80% | 21 |
 
+## Commanding
+
+```python
+from astral.commands import CommandSequencer, PersistentReplayGuard
+seq = CommandSequencer()                                    # sender
+guard = PersistentReplayGuard("uplink.json", "sat-1")       # receiver
+unpack_stream(stream, key=KEY, replay_guard=guard)
+```
+
+| Class | Survives a restart | Use for |
+|---|---|---|
+| `PersistentReplayGuard` | yes | real hardware |
+| `ReplayGuard` | no | tests, single-run tools |
+
+CLI: `astral unpack cmd.bin --key HEX --replay-state PATH [--link-id ID]`
+
 ## Wire cost
 
 ```

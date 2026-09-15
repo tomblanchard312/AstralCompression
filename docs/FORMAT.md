@@ -440,6 +440,9 @@ A receiver **must**:
 * reject a command whose MAC is absent or does not verify;
 * reject a command whose counter is not strictly greater than the last
   accepted counter for that key, and not advance its window on rejection;
+* keep that high-water mark across restarts, and record it durably before
+  acting on the command. A receiver that forgets it on restart offers no
+  replay protection at all;
 * never present an unverified command as if it were verified.
 
 The counter is 32 bits and must not wrap; rekey instead. CRC-32 and CRC-8
