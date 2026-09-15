@@ -1,7 +1,7 @@
 """
 Frozen wire-format test vectors.
 
-These pin the bytes ASTRAL puts on the wire so that an independent
+These pin the bytes GistLink puts on the wire so that an independent
 implementation (the Rust extension, a C port, a ground-station plugin) can be
 checked against the same values, and so that an accidental change to a
 format-defining routine fails here rather than in the field.
@@ -31,14 +31,14 @@ from __future__ import annotations
 
 import pytest
 
-from astral import codec, container
-from astral.crc import crc16_ccitt, crc8_j1850
-from astral.fountain import _Xorshift32, lt_encode_blocks
-from astral.textpack import decode_text, encode_text
-from astral.tmframe import apply_prng
+from gistlink import codec, container
+from gistlink.crc import crc16_ccitt, crc8_j1850
+from gistlink.fountain import _Xorshift32, lt_encode_blocks
+from gistlink.textpack import decode_text, encode_text
+from gistlink.tmframe import apply_prng
 
 try:
-    from astral import rs_fec
+    from gistlink import rs_fec
 
     RS_AVAILABLE = True
 except ImportError:  # optional extra
@@ -197,4 +197,4 @@ class TestContainerVectors:
 class TestIntegrityVectors:
     def test_integrity_crc_vector(self):
         header = bytes(range(21))
-        assert codec.integrity_crc(header, b"ASTRAL") == 0x1FE2F07E
+        assert codec.integrity_crc(header, b"payload") == 0x5385A965

@@ -1,6 +1,6 @@
-"""Tests for astral/textpack.py - dictionary-based text compression."""
+"""Tests for gistlink/textpack.py - dictionary-based text compression."""
 
-from astral.textpack import decode_text, encode_text
+from gistlink.textpack import decode_text, encode_text
 
 
 class TestEncodeDecodeRoundtrip:

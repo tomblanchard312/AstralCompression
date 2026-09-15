@@ -1,13 +1,13 @@
 import random
-from astral.codec import (
+from gistlink.codec import (
     pack_message,
     unpack_stream,
     pack_text_message,
     pack_cmd_message,
 )
-from astral.container import make_atom, parse_atoms
-from astral.fountain import lt_encode_blocks, lt_decode_blocks
-from astral.bitstream import BitWriter, BitReader
+from gistlink.container import make_atom, parse_atoms
+from gistlink.fountain import lt_encode_blocks, lt_decode_blocks
+from gistlink.bitstream import BitWriter, BitReader
 
 
 def test_basic_functionality():
@@ -142,7 +142,7 @@ def test_text_messages():
     """Test text message encoding/decoding"""
     print("Testing text messages...")
 
-    text = "Hello from ASTRAL: nominal link, standing by."
+    text = "Hello from GistLink: nominal link, standing by."
     blob = pack_text_message(text, extra_fountain=5)
 
     result = unpack_stream(blob)

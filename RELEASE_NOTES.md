@@ -1,11 +1,16 @@
-# ASTRAL 1.1.0
+# GistLink 2.0.0
+
+Formerly ASTRAL. The project and its compression engine are renamed to say
+what they do; see the CHANGELOG for the full list of moved names. The only
+wire-format change is the two magic bytes of the compressed container.
+
 
 First release with a specified wire format, frozen test vectors, and a
 security review of the command path.
 
 ## What this release is for
 
-ASTRAL is a payload format and reference implementation for compressing and
+GistLink is a payload format and reference implementation for compressing and
 delivering messages over lossy links: domain-aware compression, a replicated
 metadata gist that survives heavy loss, and a fountain-coded body that
 reassembles from whatever arrives. It can be carried inside CCSDS Space
@@ -23,11 +28,11 @@ with no software assurance regime behind it, and no flight heritage. See
 **Mission dictionaries.** A trained zstd dictionary beats every built-in
 transform on short messages, which is the traffic this format exists for:
 3,650 bytes against 4,578 for 100 short mission reports, 20% better. Train
-with `astral train-dict`, pass `--dict` to pack and unpack. The dictionary is
+with `gistlink train-dict`, pass `--dict` to pack and unpack. The dictionary is
 shared configuration; a receiver without it reports the id it needs rather
-than failing generically. Needs `astral-compression[dict]`.
+than failing generically. Needs `gistlink[dict]`.
 
-Set `ASTRAL_DICT` once and both ends use it without further flags.
+Set `GISTLINK_DICT` once and both ends use it without further flags.
 
 Train on your own traffic: a dictionary only helps on data resembling its
 training set, and a mismatched one is a regression. That is measured, not
@@ -74,7 +79,7 @@ down from 3.9 s, with no change to the wire format.
 | Format | Version | Reads older? |
 |---|---|---|
 | Atom | 2 | Yes, format 1 decodes as unverified |
-| McKay stream | 3 | Yes, format 2 decodes; a truncated v2 length is reported, not guessed |
+| compressed stream | 3 | Yes, format 2 decodes; a truncated v2 length is reported, not guessed |
 | Text payload | 2 | Yes, format 1 decodes (it was case- and whitespace-lossy) |
 | Command | 1 | Unchanged on the wire; the receiving API is stricter |
 
@@ -93,12 +98,12 @@ down from 3.9 s, with no change to the wire format.
 ## Install
 
 ```bash
-pip install astral-compression            # core, no dependencies
-pip install astral-compression[rs]        # + Reed-Solomon
-pip install astral-compression[dict]      # + mission dictionaries
-pip install astral-compression[voice]     # + Codec2 voice
-pip install astral-compression[fast]      # + Rust extension and zstd
-pip install astral-compression[all]
+pip install gistlink            # core, no dependencies
+pip install gistlink[rs]        # + Reed-Solomon
+pip install gistlink[dict]      # + mission dictionaries
+pip install gistlink[voice]     # + Codec2 voice
+pip install gistlink[fast]      # + Rust extension and zstd
+pip install gistlink[all]
 ```
 
 Python 3.9 through 3.13, tested on the 3.9-3.12 matrix in CI.
@@ -111,7 +116,7 @@ Python 3.9 through 3.13, tested on the 3.9-3.12 matrix in CI.
 * The decoder was fuzzed with 4,000 hostile inputs (random bytes, bit-flipped
   streams, shuffled fragments): no uncaught exceptions, nothing slower than a
   second.
-* The wheel installs into a clean virtual environment and the `astral`
+* The wheel installs into a clean virtual environment and the `gistlink`
   console script runs.
 
 ## Scope and limits
@@ -125,8 +130,8 @@ Read these before relying on it.
    loopback is the first thing to do before an operational deployment.
 2. **CCSDS framing gives transport compatibility, not end-to-end decoding.** A
    ground station will synchronise, derandomise, check the FECF and route by
-   APID without custom code. It will not understand the ASTRAL atoms inside;
-   the gist, fountain decoding and McKay decompression need this library at
+   APID without custom code. It will not understand the GistLink atoms inside;
+   the gist, fountain decoding and decompression need this library at
    the receiving end.
 3. **Telemetry compression is lossy** by design (Q12 quantisation, about
    1.2e-4 relative error). Use `BINARY` when you need bit-exact floats.
@@ -148,7 +153,7 @@ Read these before relying on it.
    protection.
 8. **Voice needs `pycodec2`**, and those paths are not exercised in CI.
 9. **The Rust extension is not published as a wheel.** Build it with
-   `maturin build --release` in `astral_compress/`. The pure Python path is
+   `maturin build --release` in `gistlink_native/`. The pure Python path is
    the supported one.
 
 ## Next

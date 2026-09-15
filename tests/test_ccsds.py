@@ -12,9 +12,9 @@ import struct
 
 import pytest
 
-from astral import codec
-from astral.crc import crc16_ccitt
-from astral.spacepacket import (
+from gistlink import codec
+from gistlink.crc import crc16_ccitt
+from gistlink.spacepacket import (
     APID_IDLE,
     APID_MAP,
     SpacePacketSequenceCounter,
@@ -22,7 +22,7 @@ from astral.spacepacket import (
     unwrap,
     wrap,
 )
-from astral.tmframe import (
+from gistlink.tmframe import (
     ASM,
     FECF_SIZE,
     FILL_BYTE,
@@ -39,7 +39,7 @@ from astral.tmframe import (
 )
 
 try:
-    from astral import rs_fec
+    from gistlink import rs_fec
 
     RS_AVAILABLE = True
 except ImportError:  # optional extra
@@ -58,7 +58,7 @@ DETECT = {"type": "DETECT", "subject": "KESTREL-2", "object": "H2O_ICE",
 class TestSpacePacket:
     def test_primary_header_fields(self):
         counter = SpacePacketSequenceCounter()
-        packet = wrap(b"ASTRAL payload", "DETECT", counter)
+        packet = wrap(b"GistLink payload", "DETECT", counter)
         w1, w2, length = struct.unpack(">HHH", packet[:6])
         assert (w1 >> 13) & 0x7 == 0  # CCSDS packet version 1
         assert (w1 >> 12) & 0x1 == 0  # TM
@@ -78,7 +78,7 @@ class TestSpacePacket:
         counter = SpacePacketSequenceCounter()
         payload = bytes(range(256))
         parsed = unwrap(wrap(payload, "TEXT", counter))
-        assert parsed["astral_stream"] == payload
+        assert parsed["gistlink_stream"] == payload
         assert parsed["msg_type"] == "TEXT"
 
     def test_counters_are_independent_per_apid_and_wrap(self):
@@ -185,7 +185,7 @@ class TestTmFrames:
             encode_frames(b"x", scid=1, mode="NOT_A_MODE")
 
     def test_randomiser_roundtrip(self):
-        payload = bytes(range(200)) + b"ASTRAL"
+        payload = bytes(range(200)) + b"GistLink"
         for randomise in (True, False):
             wire = encode_frames(payload, scid=42, randomise=randomise)
             data, stats = decode_frames(wire, randomise=randomise)

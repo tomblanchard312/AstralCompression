@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "astral-compression"
-version = "1.1.0"
-description = "Extreme compression and loss-tolerant messaging for deep-space RF links"
+name = "gistlink"
+version = "2.0.0"
+description = "Loss-tolerant messaging for one-way links, where the gist arrives first"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
@@ -15,7 +15,7 @@ requires-python = ">=3.9"
 dependencies = []
 keywords = [
     "compression", "fountain-code", "lt-code", "ccsds", "space", "telemetry",
-    "reed-solomon", "deep-space", "erasure-coding",
+    "reed-solomon", "deep-space", "erasure-coding", "lossy-links", "lora",
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -36,30 +36,30 @@ classifiers = [
 ]
 
 [tool.setuptools]
-packages = { find = { exclude = ["astral_compress*", "tests*", "benchmarks*", "docs*", "examples*"] } }
+packages = { find = { exclude = ["gistlink_native*", "tests*", "benchmarks*", "docs*", "examples*"] } }
 
 [tool.setuptools.package-data]
-astral = ["py.typed"]
+gistlink = ["py.typed"]
 
 [project.optional-dependencies]
 rs    = ["reedsolo>=1.7"]
 dict  = ["zstandard>=0.21"]
 voice = ["pycodec2>=4.0", "numpy>=1.24"]
-fast = ["astral-compress>=0.1.0", "zstd>=1.5"]
+fast = ["gistlink-compress>=0.1.0", "zstd>=1.5"]
 all   = [
     "reedsolo>=1.7", "zstandard>=0.21", "pycodec2>=4.0", "numpy>=1.24",
-    "astral-compress>=0.1.0", "zstd>=1.5",
+    "gistlink-compress>=0.1.0", "zstd>=1.5",
 ]
 
 [project.urls]
-Homepage = "https://github.com/tomblanchard312/AstralCompression"
-Repository = "https://github.com/tomblanchard312/AstralCompression"
-Changelog = "https://github.com/tomblanchard312/AstralCompression/blob/main/CHANGELOG.md"
-Specification = "https://github.com/tomblanchard312/AstralCompression/blob/main/docs/FORMAT.md"
-Issues = "https://github.com/tomblanchard312/AstralCompression/issues"
+Homepage = "https://github.com/tomblanchard312/gistlink"
+Repository = "https://github.com/tomblanchard312/gistlink"
+Changelog = "https://github.com/tomblanchard312/gistlink/blob/main/CHANGELOG.md"
+Specification = "https://github.com/tomblanchard312/gistlink/blob/main/docs/FORMAT.md"
+Issues = "https://github.com/tomblanchard312/gistlink/issues"
 
 [project.scripts]
-astral = "astral.cli:main"
+gistlink = "gistlink.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,8 +1,8 @@
-# ASTRAL Wire Format Specification
+# GistLink Wire Format Specification
 
-Version 1.0, atom format 2, McKay format 3.
+Version 2.0, atom format 2, compressed container format 3/4.
 
-This document defines the bytes ASTRAL puts on the wire, completely enough to
+This document defines the bytes GistLink puts on the wire, completely enough to
 write an independent implementation. Where a value is fixed, it is stated
 here; where the reference implementation is the authority, that is said
 explicitly.
@@ -22,12 +22,12 @@ layers use big-endian, as those standards require, and say so.
   optional   CCSDS TM Transfer Frame   (section 6)
   optional   CCSDS Reed-Solomon codeblock (section 7)
   optional   CCSDS Space Packet        (section 5)
-  required   ASTRAL atom stream        (section 2)
+  required   GistLink atom stream        (section 2)
                HEADER_GIST atoms       (section 3)
                FOUNTAIN_PACKET atoms   (section 4)
-               MCKAY_GIST atoms        (section 8)
+               COMPRESSED_GIST atoms        (section 8)
                DICT_UPDATE atoms       (section 9)
-  payload    grammar / text / command / McKay stream
+  payload    grammar / text / command / compressed stream
 ```
 
 Each outer layer is independent: an atom stream is valid on its own.
@@ -56,7 +56,7 @@ Every atom is exactly **32 bytes**.
 | 0 | `HEADER_GIST` | 3 |
 | 1 | `FOUNTAIN_PACKET` | 4 |
 | 2 | `DICT_UPDATE` | 9 |
-| 3 | `MCKAY_GIST` | 8 |
+| 3 | `COMPRESSED_GIST` | 8 |
 
 **CRC-8**: polynomial `0x1D`, initial value `0xFF`, final XOR `0xFF`, MSB
 first (CRC-8/J1850). `crc8(b"123456789") == 0x4B`.
@@ -103,7 +103,7 @@ emitted low byte first. Writing a 3-bit field of value 1 produces `0x01`, not
 | 3 | Coarse confidence, `round(conf * 7)` |
 
 Message types: 1 `DETECT`, 2 `STATUS`, 3 `TEXT`, 4 `VOICE`, 5 `CMD`,
-6 `CMD_BATCH`, 7 `MCKAY`. Object ids: 1 `H2O_ICE`, 2 `CH4_ICE`, 3 `BASALT`,
+6 `CMD_BATCH`, 7 `COMPRESS`. Object ids: 1 `H2O_ICE`, 2 `CH4_ICE`, 3 `BASALT`,
 4 `UNKNOWN`.
 
 ### 3.2 Integrity CRC-32
@@ -309,19 +309,19 @@ offset `j`, and the codewords are re-interleaved on output, so a burst error
 is spread across codewords. At interleave 5, RS(255,223) corrects any burst up
 to 80 bytes.
 
-ASTRAL also defines per-atom codes RS(48,32) and RS(64,32) over the same
+GistLink also defines per-atom codes RS(48,32) and RS(64,32) over the same
 field and generator, for repairing a damaged atom instead of discarding it.
 These are **not** CCSDS codeblocks.
 
 ---
 
-## 8. MCKAY_GIST payload
+## 8. COMPRESSED_GIST payload
 
-21 bytes, replicated like the header, present only in McKay messages.
+21 bytes, replicated like the header, present only in compressed messages.
 
 | Offset | Size | Field |
 |---|---|---|
-| 0 | 1 | McKay format version |
+| 0 | 1 | container format version |
 | 1 | 1 | Transform id |
 | 2 | 1 | Data type id |
 | 3 | 4 | Original size, uint32 LE |
@@ -333,14 +333,14 @@ These are **not** CCSDS codeblocks.
 Data type ids: 0 `AUTO`, 1 `TEXT`, 2 `TELEMETRY`, 3 `VOICE`, 4 `BINARY`,
 5 `IMAGE`.
 
-### 8.1 McKay stream (format 3)
+### 8.1 compressed stream (format 3)
 
-The message payload is a McKay stream: a 10-byte header followed by the
+The message payload is a compressed stream: a 10-byte header followed by the
 transform payload.
 
 | Offset | Size | Field |
 |---|---|---|
-| 0 | 2 | Magic `MK` |
+| 0 | 2 | Magic `GL` |
 | 2 | 1 | Version, 3 |
 | 3 | 1 | Transform id |
 | 4 | 4 | Original length, uint32 LE |
@@ -358,7 +358,7 @@ describes itself:
 
 | Offset | Size | Field |
 |---|---|---|
-| 0 | 2 | Magic `MK` |
+| 0 | 2 | Magic `GL` |
 | 2 | 1 | `(4 << 4) | transform`, so `0x45` for the dictionary transform |
 | 3 | .. | A bare zstd frame |
 
@@ -429,7 +429,7 @@ Byte 0 is the version (2), byte 1 is flags (0). Then a sequence of records:
 | 4 | Explicit separator | LEB128 byte length, then UTF-8 |
 
 Dictionary indices are 1-based into the base lexicon (see
-`astral/textpack.py`, which is the authority for its contents and order).
+`gistlink/textpack.py`, which is the authority for its contents and order).
 
 Separators are implicit where they follow the common shape: a single space
 before a token starting with an alphanumeric, nothing before punctuation, and
@@ -476,7 +476,7 @@ A receiver **must**:
 
 The counter is 32 bits and must not wrap; rekey instead. CRC-32 and CRC-8
 elsewhere in this format detect noise, not tampering; this HMAC is the only
-authentication in ASTRAL.
+authentication in GistLink.
 
 ### 11.2 Command batch
 
@@ -506,7 +506,7 @@ Subject ids: 1 `KESTREL-1`, 2 `KESTREL-2`, 3 `ORION-A`.
 |---|---|
 | Atoms per message | 65535 (16-bit counters) |
 | Payload per message | about 512 KB; see `codec.max_payload_bytes()` |
-| McKay original length | 4 GB (uint32) |
+| container original length | 4 GB (uint32) |
 | Command counter | 2^32, must not wrap |
 | Space Packet user data | 65536 bytes |
 

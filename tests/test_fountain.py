@@ -1,7 +1,7 @@
-"""Tests for astral/fountain.py - xorshift32 PRNG and LT fountain code."""
+"""Tests for gistlink/fountain.py - xorshift32 PRNG and LT fountain code."""
 
 import pytest
-from astral.fountain import (
+from gistlink.fountain import (
     _Xorshift32,
     _robust_soliton,
     lt_decode_blocks,

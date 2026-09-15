@@ -34,12 +34,12 @@ jobs:
 
       - name: Build and install Rust extension
         run: |
-          cd astral_compress
+          cd gistlink_native
           maturin build --release --out ../dist
           pip install ../dist/*.whl
 
       - name: Lint with flake8
-        run: flake8 astral/ tests/ benchmarks/ --config=setup.cfg
+        run: flake8 gistlink/ tests/ benchmarks/ --config=setup.cfg
 
       - name: Run tests
         env:
@@ -51,8 +51,8 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           python -c "
-          import astral_compress as ac
-          from astral import mckay_astral_integration as mk
+          import gistlink_native as ac
+          from gistlink import compress as mk
           assert hasattr(ac, 'compress_text'), 'extension built but not importable'
           assert mk._RUST_AVAILABLE, 'Rust fast path not selected'
           print('Rust extension active')

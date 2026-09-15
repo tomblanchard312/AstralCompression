@@ -1,4 +1,4 @@
-# ASTRAL Quick Reference
+# GistLink Quick Reference
 
 ## CLI
 
@@ -7,8 +7,8 @@
 | `pack IN.json OUT.bin` | pack a grammar message into atoms |
 | `unpack IN.bin` | best-effort decode to JSON |
 | `simulate IN.bin OUT.bin --drop 0.4 --seed 1` | drop atoms at random |
-| `pack-mckay IN OUT.bin --type TEXT` | compress with McKay, send as atoms |
-| `unpack-mckay IN.bin [OUT]` | decode a McKay atom stream |
+| `pack-file IN OUT.bin --type TEXT` | compress a file, send as atoms |
+| `unpack-file IN.bin [OUT]` | decode a compressed atom stream |
 | `pack-text "..." OUT.bin` | TEXT message |
 | `pack-text-with-dict "a,b" "..." OUT.bin` | TEXT plus lexicon update |
 | `pack-voice IN.wav OUT.bin` / `unpack-voice IN.bin OUT.wav` | VOICE |
@@ -18,7 +18,7 @@
 | `encode-rs IN.bin OUT.bin --e 16` / `decode-rs` | per-atom Reed-Solomon |
 | `frame-tm IN.bin OUT.bin --scid 42 [--mode VCA\|PACKET]` / `deframe-tm` | CCSDS TM frames |
 
-Useful flags on `pack-mckay`: `--redundancy R` (proportional fountain
+Useful flags on `pack-file`: `--redundancy R` (proportional fountain
 overhead, default 1.0), `--min-redundancy N` (floor), `--extra N` (extra
 atoms), `--header-redundancy N` and `--survive-loss R` (size gist survival for
 a loss rate).
@@ -26,9 +26,9 @@ a loss rate).
 ## Python API
 
 ```python
-from astral import (
+from gistlink import (
     pack_message, unpack_stream,
-    pack_mckay_message, unpack_mckay_stream,
+    pack_compressed_message, unpack_compressed_stream,
     header_redundancy_for,
     pack_message_sp, unpack_stream_sp,     # CCSDS Space Packet
     pack_message_rs, unpack_stream_rs,     # per-atom Reed-Solomon
@@ -39,16 +39,16 @@ from astral import (
 Compression on its own:
 
 ```python
-from astral import mckay_astral_integration as mckay
-mckay.compress(data, "TELEMETRY", channels=4)
-mckay.decompress(stream)
-mckay.stats(stream)
+from gistlink import compress as compress
+compress.compress(data, "TELEMETRY", channels=4)
+compress.decompress(stream)
+compress.stats(stream)
 ```
 
 CCSDS Reed-Solomon codeblocks (needs the `rs` extra):
 
 ```python
-from astral import rs_fec
+from gistlink import rs_fec
 block = rs_fec.encode_codeblock(frame_1115_bytes)      # RS(255,223) I=5 -> 1275 B
 data, corrected, ok = rs_fec.decode_codeblock(block)
 ```
@@ -58,11 +58,11 @@ data, corrected, ok = rs_fec.decode_codeblock(block)
 | Key | Meaning |
 |---|---|
 | `gist` | coarse type/object/location/confidence, from the header atom |
-| `mckay` | McKay metadata gist (McKay streams only) |
+| `compression` | compression metadata gist (compressed streams only) |
 | `complete` | payload fully recovered |
 | `recovered_fraction` | share of source blocks solved |
 | `message` | decoded message dict, or `None` |
-| `data` | decompressed bytes (McKay streams only) |
+| `data` | decompressed bytes (compressed streams only) |
 | `integrity_ok` | `True` verified, `False` corrupt, `None` not verified (incomplete recovery, or a pre-v2 stream) |
 
 ## Data types
@@ -86,32 +86,32 @@ data, corrected, ok = rs_fec.decode_codeblock(block)
 ## Mission dictionaries
 
 ```bash
-astral train-dict "samples/*.txt" -o mission.dict [--size 16384]
-astral pack-mckay in.txt out.bin --type TEXT --dict mission.dict
-astral unpack-mckay out.bin recovered.txt --dict mission.dict
+gistlink train-dict "samples/*.txt" -o mission.dict [--size 16384]
+gistlink pack-file in.txt out.bin --type TEXT --dict mission.dict
+gistlink unpack-file out.bin recovered.txt --dict mission.dict
 ```
 
 ```python
-from astral.dictionary import train, MissionDictionary, DictionaryRegistry
+from gistlink.dictionary import train, MissionDictionary, DictionaryRegistry
 d = train(list_of_sample_messages)      # a few hundred real messages
 d.save("mission.dict")
 registry = DictionaryRegistry(); registry.load("mission.dict")
-pack_mckay_message(data, "TEXT", dictionary=d)
-unpack_mckay_stream(stream, dictionaries=registry)
+pack_compressed_message(data, "TEXT", dictionary=d)
+unpack_compressed_stream(stream, dictionaries=registry)
 ```
 
-Or set `ASTRAL_DICT=/path/mission.dict` once and both pack and unpack use it.
+Or set `GISTLINK_DICT=/path/mission.dict` once and both pack and unpack use it.
 
 20% smaller than the built-in transform on traffic that matches the training
 set, and never larger on traffic that does not: both encodings are produced
 and the smaller is sent. Train on your own messages; a generic dictionary
-makes unmatched traffic bigger. Needs `astral-compression[dict]`. Both ends
+makes unmatched traffic bigger. Needs `gistlink[dict]`. Both ends
 need the same file; a receiver without it reports `missing_dictionary`.
 
 ## Commanding
 
 ```python
-from astral.commands import CommandSequencer, PersistentReplayGuard
+from gistlink.commands import CommandSequencer, PersistentReplayGuard
 seq = CommandSequencer()                                    # sender
 guard = PersistentReplayGuard("uplink.json", "sat-1")       # receiver
 unpack_stream(stream, key=KEY, replay_guard=guard)
@@ -122,7 +122,7 @@ unpack_stream(stream, key=KEY, replay_guard=guard)
 | `PersistentReplayGuard` | yes | real hardware |
 | `ReplayGuard` | no | tests, single-run tools |
 
-CLI: `astral unpack cmd.bin --key HEX --replay-state PATH [--link-id ID]`
+CLI: `gistlink unpack cmd.bin --key HEX --replay-state PATH [--link-id ID]`
 
 ## Wire cost
 
@@ -143,14 +143,14 @@ transmission to be smaller than the source.
 
 - Payload per message: about 512 KB (`codec.max_payload_bytes()`).
 - Atom: 32 bytes, 21 of them payload; symbol size 16 bytes.
-- McKay original length: 4 GB (uint32).
+- container original length: 4 GB (uint32).
 - Small messages expand; fountain redundancy pays off from a few KB up.
 
 ## Checks
 
 ```bash
 python -m pytest tests
-python -m flake8 astral/ tests/ *.py --config=setup.cfg
-python benchmarks/mckay_vs_standard.py
+python -m flake8 gistlink/ tests/ *.py --config=setup.cfg
+python benchmarks/compression_benchmark.py
 python examples/usage.py
 ```
