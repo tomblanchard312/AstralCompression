@@ -3,12 +3,14 @@ from __future__ import annotations
 import math
 import os
 import struct
+import zlib
 from .container import make_atom, parse_atoms
 from .container import HEADER_GIST, FOUNTAIN_PACKET, DICT_UPDATE, MCKAY_GIST
 from .grammar import make_gist_bits, encode_payload, decode_payload
 from .grammar import parse_gist
 from .textpack import encode_text, decode_text
 from .commands import (
+    CommandAuthError,
     encode_cmd,
     decode_cmd,
     encode_cmd_batch,
@@ -78,7 +80,8 @@ def _resolve_header_redundancy(header_redundancy, fountain_atoms: int) -> int:
     return max(HEADER_REDUNDANCY, math.ceil(HEADER_FRACTION * fountain_atoms))
 
 
-GIST_ROOM = 21 - 11  # bytes left in the header atom after the fountain fields
+GIST_ROOM = 5  # bytes the 33-bit gist occupies in the header atom
+PAYLOAD_CRC_OFFSET = 16  # header bytes 16-19: CRC-32 of the assembled payload
 
 
 def max_payload_bytes(min_redundancy: int = 10, extra_fountain: int = 0) -> int:
@@ -113,14 +116,72 @@ def _check_payload_size(
         )
 
 
+def _command_auth_state(message):
+    """True/False for CMD messages, None when the message is not a command."""
+    if not isinstance(message, dict):
+        return None
+    body = message.get("cmd") or message.get("batch")
+    if not isinstance(body, dict):
+        return None
+    return bool(body.get("authenticated"))
+
+
+def _majority(candidates):
+    """
+    The most common value among replicated atoms, ties broken by first seen.
+
+    Replication exists so the gist survives loss; it also gives corruption
+    detection for free, because a damaged copy is outvoted by its twins.
+    """
+    if len(candidates) == 1:
+        return candidates[0]
+    counts: dict = {}
+    for value in candidates:
+        counts[value] = counts.get(value, 0) + 1
+    best = max(counts.values())
+    for value in candidates:  # first-seen order among the winners
+        if counts[value] == best:
+            return value
+    return candidates[0]
+
+
+def _normalise_header(header: bytes) -> bytes:
+    """The header with its own checksum slot zeroed, for CRC purposes."""
+    return (
+        header[:PAYLOAD_CRC_OFFSET]
+        + b"\x00\x00\x00\x00"
+        + header[PAYLOAD_CRC_OFFSET + 4 :]
+    )
+
+
+def integrity_crc(header: bytes, payload: bytes) -> int:
+    """
+    The end-to-end checksum: CRC-32 over the header and the payload together.
+
+    Covering the payload alone is not enough. The header carries the fields
+    that decide how the payload is interpreted (the gist type selects the
+    decoder, K and the seed drive reassembly), so a corrupt header atom that
+    happened to pass its own CRC-8 could turn an intact TEXT payload into a
+    fabricated STATUS report while the payload checksum still matched. Binding
+    the two together means any single corruption in either is detected.
+    """
+    return zlib.crc32(payload, zlib.crc32(_normalise_header(header)))
+
+
 def _build_header(
     gist_bytes: bytes,
     gist_bits: int,
     K: int,
     fountain_seed: int,
     payload_len: int,
+    payload: bytes = b"",
 ) -> bytes:
-    """Assemble the 21-byte HEADER_GIST payload shared by every pack_* call."""
+    """
+    Assemble the 21-byte HEADER_GIST payload shared by every pack_* call.
+
+    Layout: K(2) symbol_size(1) seed(4) payload_len(3) gist_bits(1)
+    gist(5) integrity_crc32(4), little-endian throughout.
+    """
     header = bytearray(21)
     header[0] = K & 0xFF
     header[1] = (K >> 8) & 0xFF
@@ -131,6 +192,8 @@ def _build_header(
     header[9] = (payload_len >> 16) & 0xFF
     header[10] = gist_bits & 0xFF
     header[11 : 11 + min(len(gist_bytes), GIST_ROOM)] = gist_bytes[:GIST_ROOM]
+    crc = integrity_crc(bytes(header), payload)
+    header[PAYLOAD_CRC_OFFSET : PAYLOAD_CRC_OFFSET + 4] = crc.to_bytes(4, "little")
     return bytes(header)
 
 
@@ -207,7 +270,9 @@ def pack_text_with_dict(
     blocks = chunk_blocks(payload, SYMBOL_SIZE)
     K = len(blocks)
     fountain_seed = int.from_bytes(os.urandom(4), "little") or 1
-    header = _build_header(gist_bytes, gist_bits, K, fountain_seed, len(payload))
+    header = _build_header(
+        gist_bytes, gist_bits, K, fountain_seed, len(payload), payload
+    )
 
     # The header is replicated: if every copy is lost there is no gist and no
     # fountain parameters, so this is the floor on surviving heavy loss.
@@ -258,8 +323,9 @@ def pack_cmd_message(
     min_redundancy: int = 10,
     header_redundancy: int | None = None,
     redundancy: float = 1.0,
+    counter: int = 0,
 ) -> bytes:
-    payload = encode_cmd(cmd, key=key)
+    payload = encode_cmd(cmd, key=key, counter=counter)
     msg = {"type": "CMD", "conf": 0.99}
     return _pack_with_custom_payload(
         msg,
@@ -301,8 +367,9 @@ def pack_cmd_batch(
     min_redundancy: int = 10,
     header_redundancy: int | None = None,
     redundancy: float = 1.0,
+    counter: int = 0,
 ) -> bytes:
-    payload = encode_cmd_batch(batch, key=key)
+    payload = encode_cmd_batch(batch, key=key, counter=counter)
     msg = {"type": "CMD_BATCH", "conf": 0.99}
     return _pack_with_custom_payload(
         msg,
@@ -335,7 +402,9 @@ def _pack_with_custom_payload(
     blocks = chunk_blocks(payload, SYMBOL_SIZE)
     K = len(blocks)
     fountain_seed = int.from_bytes(os.urandom(4), "little") or 1
-    header = _build_header(gist_bytes, gist_bits, K, fountain_seed, len(payload))
+    header = _build_header(
+        gist_bytes, gist_bits, K, fountain_seed, len(payload), payload
+    )
 
     M = fountain_atom_count(K, min_redundancy, redundancy, extra_fountain)
     n_header = _resolve_header_redundancy(header_redundancy, M)
@@ -511,7 +580,16 @@ def unpack_mckay_stream(stream: bytes) -> dict:
     return result
 
 
-def unpack_stream(stream: bytes):
+def unpack_stream(stream: bytes, key: bytes | None = None, replay_guard=None):
+    """
+    Decode an ASTRAL stream.
+
+    ``key`` and ``replay_guard`` apply to CMD and CMD_BATCH messages. With a
+    key, a command that fails authentication or freshness is reported as an
+    error instead of being returned. Without one, commands are still decoded
+    for inspection but are tagged ``authenticated: False``: never act on such
+    a command.
+    """
     # Input validation
     if not isinstance(stream, bytes):
         raise ValueError("stream must be bytes")
@@ -522,38 +600,54 @@ def unpack_stream(stream: bytes):
     if not atoms:
         return {"error": "no valid atoms"}
 
-    msg_id = atoms[0][2]
-    header_atom = None
-    mckay_atom = None
+    msg_id = atoms[0].message_id
+    header_candidates = []
+    mckay_candidates = []
     fountain_atoms = []
     dict_atoms = []
-    total_atoms = atoms[0][1]
-    for idx, total, mid, typ, payload in atoms:
+    total_atoms = atoms[0].total_atoms
+    atom_version = atoms[0].version
+    for _idx, total, mid, typ, payload, version in atoms:
         if mid != msg_id:
             continue
         total_atoms = total
-        if typ == HEADER_GIST and header_atom is None:
-            header_atom = payload
+        if typ == HEADER_GIST:
+            atom_version = version
+            header_candidates.append(payload)
         elif typ == FOUNTAIN_PACKET:
             fountain_atoms.append(payload)
         elif typ == DICT_UPDATE:
             dict_atoms.append(payload)
-        elif typ == MCKAY_GIST and mckay_atom is None:
-            mckay_atom = payload
+        elif typ == MCKAY_GIST:
+            mckay_candidates.append(payload)
 
-    if header_atom is None:
+    if not header_candidates:
         return {"error": "missing header/gist atom"}
+
+    # The header is replicated, so take the copy the majority agree on rather
+    # than whichever arrived first: one corrupt copy that slipped past its
+    # CRC-8 then loses the vote instead of deciding how the payload is read.
+    header_atom = _majority(header_candidates)
+    mckay_atom = _majority(mckay_candidates) if mckay_candidates else None
 
     K = header_atom[0] | (header_atom[1] << 8)
     symbol_size = header_atom[2]
     payload_len = header_atom[7] | (header_atom[8] << 8) | (header_atom[9] << 16)
     gist_bits = header_atom[10]
-    gist_room = 21 - 11
     # Calculate how many bytes the gist bits actually occupy
     gist_bytes_needed = (gist_bits + 7) // 8
-    gist_bytes = header_atom[11 : 11 + min(gist_bytes_needed, gist_room)]
+    gist_bytes = header_atom[11 : 11 + min(gist_bytes_needed, GIST_ROOM)]
 
     gist = parse_gist(gist_bytes, gist_bits)
+
+    # Atom format 2 onward carries a CRC-32 of the assembled payload, so a
+    # corrupt atom that slipped past its own CRC-8 cannot be reported as a
+    # clean decode.
+    expected_crc = None
+    if atom_version >= 2:
+        expected_crc = int.from_bytes(
+            header_atom[PAYLOAD_CRC_OFFSET : PAYLOAD_CRC_OFFSET + 4], "little"
+        )
 
     packets = []
     for p in fountain_atoms:
@@ -567,12 +661,36 @@ def unpack_stream(stream: bytes):
     message = None
     mckay_gist = _parse_mckay_gist(mckay_atom) if mckay_atom is not None else None
     decompressed = None
+    integrity = None
 
     if packets:
         recovered, frac = lt_decode_blocks(packets, K, symbol_size)
         recovered_fraction = frac
         if recovered is not None:
             payload = b"".join(recovered)[:payload_len]
+            if expected_crc is not None:
+                integrity = integrity_crc(header_atom, payload) == expected_crc
+                if not integrity:
+                    # The blocks solved, but they do not reconstruct the payload
+                    # that was sent. Reporting this as a decode would hand the
+                    # caller silently wrong data.
+                    return {
+                        "message_id": msg_id,
+                        "total_atoms": total_atoms,
+                        "received_atoms": len(atoms),
+                        "gist": gist,
+                        "mckay": mckay_gist,
+                        "complete": False,
+                        "recovered_fraction": recovered_fraction,
+                        "message": None,
+                        "data": None,
+                        "integrity_ok": False,
+                        "error": (
+                            "integrity check failed: the atoms reassembled "
+                            "but the CRC-32 over the header and payload does "
+                            "not match. At least one atom was corrupt."
+                        ),
+                    }
             try:
                 mtype = gist.get("type")
                 if dict_atoms:
@@ -600,12 +718,45 @@ def unpack_stream(stream: bytes):
                 elif mtype == "VOICE":
                     message = {"type": "VOICE", "bytes": payload}
                 elif mtype == "CMD":
-                    message = {"type": "CMD", "cmd": decode_cmd(payload)}
+                    message = {
+                        "type": "CMD",
+                        "cmd": decode_cmd(
+                            payload,
+                            key=key,
+                            require_auth=key is not None,
+                            replay_guard=replay_guard,
+                        ),
+                    }
                 elif mtype == "CMD_BATCH":
-                    message = {"type": "CMD_BATCH", "batch": decode_cmd_batch(payload)}
+                    message = {
+                        "type": "CMD_BATCH",
+                        "batch": decode_cmd_batch(
+                            payload,
+                            key=key,
+                            require_auth=key is not None,
+                            replay_guard=replay_guard,
+                        ),
+                    }
                 else:
                     message = decode_payload(payload)
                 complete = True
+            except CommandAuthError as exc:
+                # A command that cannot be authenticated must not look like a
+                # decode that merely failed for lack of atoms.
+                return {
+                    "message_id": msg_id,
+                    "total_atoms": total_atoms,
+                    "received_atoms": len(atoms),
+                    "gist": gist,
+                    "mckay": mckay_gist,
+                    "complete": False,
+                    "recovered_fraction": recovered_fraction,
+                    "message": None,
+                    "data": None,
+                    "integrity_ok": integrity,
+                    "command_authenticated": False,
+                    "error": f"command authentication failed: {exc}",
+                }
             except Exception:
                 complete = False
                 message = None
@@ -620,6 +771,8 @@ def unpack_stream(stream: bytes):
         "recovered_fraction": recovered_fraction,
         "message": message,
         "data": decompressed,
+        "integrity_ok": integrity,
+        "command_authenticated": _command_auth_state(message),
     }
 
 

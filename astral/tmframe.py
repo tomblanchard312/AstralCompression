@@ -82,12 +82,18 @@ def apply_prng(data: bytes) -> bytes:
 
     Test vector: ``apply_prng(bytes(8)) == bytes.fromhex("ff480ec09a0d70bc")``.
     """
-    if not isinstance(data, bytes):
+    if not isinstance(data, (bytes, bytearray, memoryview)):
         raise TypeError("data must be bytes")
     n = len(data)
+    if n == 0:
+        return b""
     reps = -(-n // _PN_PERIOD)
     seq = (_PN_CACHE * reps)[:n]
-    return bytes(a ^ b for a, b in zip(data, seq))
+    # XOR the whole frame as one big integer: a per-byte generator over a
+    # 1115-byte frame is the single most expensive step of framing a message.
+    return (
+        int.from_bytes(data, "big") ^ int.from_bytes(seq, "big")
+    ).to_bytes(n, "big")
 
 
 class TmFrameCounter:

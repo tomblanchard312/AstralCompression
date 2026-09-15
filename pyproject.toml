@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astral-compression"
-version = "0.7.0"
+version = "1.0.0"
 description = "Extreme compression and loss-tolerant messaging for deep-space RF links"
 readme = "README.md"
 license = { text = "MIT" }
@@ -13,9 +13,30 @@ authors = [
 ]
 requires-python = ">=3.9"
 dependencies = []
+keywords = [
+    "compression", "fountain-code", "lt-code", "ccsds", "space", "telemetry",
+    "reed-solomon", "deep-space", "erasure-coding",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Telecommunications Industry",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
+    "Topic :: Communications",
+    "Topic :: Scientific/Engineering",
+    "Topic :: System :: Archiving :: Compression",
+]
 
 [tool.setuptools]
-packages = { find = { exclude = ["astral_compress*"] } }
+packages = { find = { exclude = ["astral_compress*", "tests*", "benchmarks*", "docs*"] } }
 
 [project.optional-dependencies]
 rs    = ["reedsolo>=1.7"]
@@ -26,6 +47,9 @@ all   = ["reedsolo>=1.7", "pycodec2>=4.0", "numpy>=1.24", "astral-compress>=0.1.
 [project.urls]
 Homepage = "https://github.com/tomblanchard312/AstralCompression"
 Repository = "https://github.com/tomblanchard312/AstralCompression"
+Changelog = "https://github.com/tomblanchard312/AstralCompression/blob/main/CHANGELOG.md"
+Specification = "https://github.com/tomblanchard312/AstralCompression/blob/main/docs/FORMAT.md"
+Issues = "https://github.com/tomblanchard312/AstralCompression/issues"
 
 [project.scripts]
 astral = "astral.cli:main"

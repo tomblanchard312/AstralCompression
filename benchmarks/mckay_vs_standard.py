@@ -7,13 +7,19 @@ for lossy telemetry quantisation, reproduce it within the quantiser's error
 bound) before its ratio is reported. Run it to reproduce the numbers quoted in
 the README:
 
-    python mckay_vs_standard.py
-    python mckay_vs_standard.py --iterations 5
+    python benchmarks/mckay_vs_standard.py
+    python benchmarks/mckay_vs_standard.py --iterations 5
 
 The McKay column uses the Rust extension when it is built and the pure Python
 implementation otherwise; the report says which.
 """
 import sys
+
+import os
+
+# Run from anywhere: these live in benchmarks/ but exercise the package at the
+# repository root.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Windows consoles default to a legacy code page; these scripts print check
 # marks, so force UTF-8 rather than dying with UnicodeEncodeError mid-report.

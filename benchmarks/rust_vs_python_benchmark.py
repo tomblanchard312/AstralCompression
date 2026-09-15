@@ -5,6 +5,12 @@ This demonstrates the performance improvements achieved by using Rust.
 """
 import sys
 
+import os
+
+# Run from anywhere: these live in benchmarks/ but exercise the package at the
+# repository root.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 # Windows consoles default to a legacy code page; these scripts print check
 # marks, so force UTF-8 rather than dying with UnicodeEncodeError mid-report.
 if hasattr(sys.stdout, "reconfigure"):

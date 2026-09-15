@@ -1,5 +1,93 @@
 # Changelog
 
+## 1.0.0
+
+See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the release summary, compatibility
+table and scope limits.
+
+### Fixed (correctness, breaking on the wire)
+- **The CCSDS Reed-Solomon code used the wrong generator polynomial.** It built
+  roots alpha^112..alpha^143 (primitive element alpha), but CCSDS uses
+  alpha^(11*(112+i)) (primitive element alpha^11, `PRIM=11` in libfec). The old
+  codewords were a valid RS code that no CCSDS ground station would decode. The
+  generator is now verified against an independent construction with the
+  `galois` library, and the parity bytes are frozen as test vectors.
+- **Berlekamp dual-basis symbols are supported and are now the default**, as
+  CCSDS specifies. `basis="conventional"` selects libfec's `encode_rs_8`
+  representation. Mismatched bases are the classic CCSDS RS interop failure.
+
+### Fixed (security)
+- **Command authentication failed open.** `unpack_stream` never verified an
+  HMAC at all; an unsigned command decoded identically to a signed one apart
+  from a flag; decoding without a key omitted the flag entirely, so
+  `.get("auth_ok", True)` passed; and replay was unrestricted. Now: decoding
+  verifies by default and raises `CommandAuthError` otherwise, every result
+  carries `authenticated`, `unpack_stream` takes a key and reports
+  `command_authenticated`, and `ReplayGuard` rejects stale counters without
+  advancing its window on a failed MAC. `CommandSequencer` is the sender-side
+  counterpart.
+
+### Added
+- `docs/FORMAT.md`: the wire format specification, complete enough for an
+  independent implementation.
+- `tests/test_vectors.py`: frozen wire-format vectors, with provenance noted
+  per vector; the Reed-Solomon ones come from an independent encoder.
+- `tests/test_ccsds.py`: CCSDS conformance tests, consolidating the checks
+  that used to live in the PHASE3/4/5 development scripts.
+- `astral` console script, packaging metadata, classifiers and project URLs.
+
+### Changed
+- Documentation reorganised: `docs/` holds the specification, integration
+  guide and quick reference; `benchmarks/` holds the benchmark scripts.
+- Removed development artefacts superseded by the test suite:
+  `PHASE3/4/5_VERIFICATION.py`, `verify_fixes.py`, `verify_core_fixes.py`,
+  `FIXES_VERIFICATION.py`, and the `README_MCKAY_ASTRAL.md` stub.
+- Version 1.0.0.
+
+## 2026-09-14 (second pass)
+
+### Fixed (data integrity)
+- **The integrity checksum covers the header, not just the payload.** The
+  header decides how the payload is read (the gist type selects the decoder),
+  so a corrupt header atom that passed its own CRC-8 could turn an intact TEXT
+  payload into a fabricated STATUS report, complete with invented lat/lon, and
+  still report `integrity_ok: True`. The CRC-32 now spans the header (with its
+  own checksum slot zeroed) and the payload together. Raised by Codex on PR #5.
+- **Replicated headers are chosen by majority vote.** The decoder used
+  whichever copy arrived first, so a single damaged copy decided how the
+  message was read. One corrupt copy is now outvoted and the message decodes
+  normally.
+- **A corrupt atom could be reported as a clean decode.** CRC-8 rejects 255 of
+  every 256 corrupt atoms; the one that slips through is XORed into the
+  reconstruction, and nothing checked the result. Atom format 2 puts a CRC-32
+  of the assembled payload in the header atom and the decoder verifies it
+  before reporting success. Measured on 600-byte payloads where the corruption
+  reaches the fountain solution, the unchecked path returned wrong bytes as a
+  clean decode in 48 of 71 cases and raised in the other 23. Results now carry
+  `integrity_ok`, and a failure is reported as `complete: False` with an
+  error, with the gist still available.
+- `tests/test_basic.py::test_lossy` used an unseeded RNG and asserted the gist
+  always survives 40% loss, which fails roughly once in 40 runs by chance. It
+  is now seeded and sizes header replication for the loss it simulates.
+
+### Changed (performance, no wire-format change)
+- The fountain code XORs symbols as big integers instead of byte at a time,
+  indexes equations by the unknowns they contain instead of rescanning every
+  equation for every solved block, and draws packet indices from a sparse
+  Fisher-Yates instead of materialising `list(range(K))` per packet.
+- CRC-8 and CRC-16 are table-driven; the TM randomizer XORs a whole frame in
+  one operation.
+- Net effect on a 200 KB message: 3.9 s to 0.45 s to pack. Fountain decode at
+  K=2000 went from 509 ms to 40 ms; TM framing from 8.8 to 13.7 MB/s.
+- The sampler and both CRCs are covered by tests asserting bit-identical
+  output against the original reference implementations, since the Rust and C
+  ports mirror them and old streams must still decode.
+
+### Changed (API)
+- `container.parse_atoms` returns `Atom` named tuples carrying the atom format
+  version. Indexes 0-4 are unchanged, so positional access still works, but
+  five-way unpacking now needs a sixth name.
+
 ## 2026-09-14
 
 ### Fixed (data integrity)

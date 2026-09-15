@@ -63,6 +63,7 @@ data, corrected, ok = rs_fec.decode_codeblock(block)
 | `recovered_fraction` | share of source blocks solved |
 | `message` | decoded message dict, or `None` |
 | `data` | decompressed bytes (McKay streams only) |
+| `integrity_ok` | `True` verified, `False` corrupt, `None` not verified (incomplete recovery, or a pre-v2 stream) |
 
 ## Data types
 
@@ -109,9 +110,6 @@ transmission to be smaller than the source.
 ```bash
 python -m pytest tests
 python -m flake8 astral/ tests/ *.py --config=setup.cfg
-python mckay_vs_standard.py
+python benchmarks/mckay_vs_standard.py
 python -m astral.mckay_usage_example
-python PHASE3_SPACEPACKET_VERIFICATION.py
-python PHASE4_RS_VERIFICATION.py
-python PHASE5_TM_VERIFICATION.py
 ```

@@ -12,6 +12,7 @@ import math
 import random
 import struct
 import warnings
+import zlib
 
 import pytest
 
@@ -519,3 +520,429 @@ class TestRedundancyControl:
     def test_negative_redundancy_rejected(self):
         with pytest.raises(ValueError):
             codec.pack_text_message("hi", redundancy=-0.1)
+
+
+class TestPayloadIntegrity:
+    """
+    A corrupt atom that slips past its CRC-8 (1 in 256 do) poisons the XOR
+    reconstruction. Nothing used to check the result, so the decoder could
+    report a clean decode and hand back different bytes than were sent.
+    """
+
+    @staticmethod
+    def _corrupt_one_atom(blob: bytes, which: int = 0) -> bytes:
+        from astral.crc import crc8_j1850
+
+        atoms = [bytearray(blob[i : i + 32]) for i in range(0, len(blob), 32)]
+        fountain = [a for a in atoms if a[9] == container.FOUNTAIN_PACKET]
+        hit = fountain[which % len(fountain)]
+        hit[12] ^= 0x08
+        hit[31] = crc8_j1850(bytes(hit[:31])) & 0xFF  # CRC-8 now passes again
+        return b"".join(bytes(a) for a in atoms)
+
+    def test_clean_stream_reports_integrity_ok(self):
+        stream = codec.pack_text_message("nominal link, standing by")
+        result = codec.unpack_stream(stream)
+        assert result["complete"] is True
+        assert result["integrity_ok"] is True
+
+    def test_header_carries_the_payload_crc(self):
+        payload = b"telemetry nominal " * 20
+        stream = codec.pack_mckay_message(payload, "TEXT")
+        header = next(
+            a.payload
+            for a in container.parse_atoms(stream)
+            if a.atom_type == container.HEADER_GIST
+        )
+        crc = int.from_bytes(
+            header[codec.PAYLOAD_CRC_OFFSET : codec.PAYLOAD_CRC_OFFSET + 4],
+            "little",
+        )
+        assert crc != 0
+
+    def test_atoms_declare_format_version_2(self):
+        stream = codec.pack_text_message("hello")
+        assert all(a.version == container.ATOM_VERSION
+                   for a in container.parse_atoms(stream))
+
+    def test_corrupt_atom_is_never_reported_as_a_clean_decode(self):
+        payload = bytes((i * 7 + 11) % 256 for i in range(600))
+        silently_wrong = 0
+        detected = 0
+        for seed in range(30):
+            blob = codec.pack_mckay_message(
+                payload, "BINARY", message_id=seed + 1, redundancy=0.05,
+                min_redundancy=1,
+            )
+            damaged = self._corrupt_one_atom(blob, seed)
+            result = codec.unpack_stream(damaged)
+            if result.get("integrity_ok") is False:
+                detected += 1
+                assert result["complete"] is False
+                assert result["message"] is None
+                assert "integrity" in result["error"]
+            elif result["complete"] and result.get("data") != payload:
+                silently_wrong += 1
+        assert silently_wrong == 0
+        # The corruption has to actually reach the solution sometimes, or this
+        # test proves nothing.
+        assert detected > 0
+
+    def test_gist_still_available_when_integrity_fails(self):
+        payload = bytes((i * 13 + 5) % 256 for i in range(600))
+        for seed in range(30):
+            blob = codec.pack_mckay_message(
+                payload, "BINARY", message_id=seed + 1, redundancy=0.05,
+                min_redundancy=1,
+            )
+            result = codec.unpack_stream(self._corrupt_one_atom(blob, seed))
+            if result.get("integrity_ok") is False:
+                # A failed payload still leaves the operator the gist.
+                assert result["gist"]["type"] == "MCKAY"
+                assert result["mckay"]["original_size"] == len(payload)
+                return
+        pytest.fail("no corruption reached the fountain solution")
+
+
+class TestWireFormatStability:
+    """
+    The sampler and the CRCs were rewritten for speed. Both define the wire
+    format and are mirrored by the Rust and C ports, so they must stay
+    bit-identical to the reference definitions.
+    """
+
+    @staticmethod
+    def _dense_sample(seed, n, k):
+        """The original materialised Fisher-Yates, kept as the reference."""
+        from astral.fountain import _Xorshift32
+
+        rng = _Xorshift32(seed)
+        pool = list(range(n))
+        for i in range(k):
+            j = i + (rng.next_u32() % (n - i))
+            pool[i], pool[j] = pool[j], pool[i]
+        return pool[:k]
+
+    def test_prng_test_vector(self):
+        from astral.fountain import _Xorshift32
+
+        assert _Xorshift32(1).next_u32() == 270369
+
+    def test_sparse_sampler_matches_dense_reference(self):
+        from astral.fountain import _Xorshift32
+
+        for seed in range(1, 60):
+            for n in (1, 2, 3, 5, 16, 97, 256, 1000):
+                for k in range(0, min(n, 8) + 1):
+                    assert (
+                        _Xorshift32(seed).sample_indices(n, k)
+                        == self._dense_sample(seed, n, k)
+                    ), f"sampler diverged at seed={seed} n={n} k={k}"
+
+    def test_crc8_matches_bitwise_reference(self):
+        from astral.crc import crc8_j1850
+
+        def reference(data):
+            crc = 0xFF
+            for b in data:
+                crc ^= b
+                for _ in range(8):
+                    crc = (
+                        ((crc << 1) ^ 0x1D) & 0xFF if crc & 0x80 else (crc << 1) & 0xFF
+                    )
+            return crc ^ 0xFF
+
+        rng = random.Random(5)
+        cases = [b"", b"\x00", bytes(range(256))]
+        cases += [bytes(rng.randrange(256) for _ in range(rng.randrange(1, 64)))
+                  for _ in range(100)]
+        for data in cases:
+            assert crc8_j1850(data) == reference(data)
+
+    def test_crc16_check_value(self):
+        from astral.crc import crc16_ccitt
+
+        # The published CRC-16/CCITT-FALSE check value, which is the variant
+        # CCSDS uses for the TM frame FECF.
+        assert crc16_ccitt(b"123456789") == 0x29B1
+
+
+class TestLargeMessagePerformance:
+    """
+    Decoding used to rescan every equation for every solved block, which is
+    quadratic and made a few hundred KB impractical. These bounds are loose
+    enough not to flake on a slow machine but tight enough to catch a return
+    to quadratic behaviour, which was 10x slower.
+    """
+
+    def test_large_fountain_roundtrip_is_exact_and_prompt(self):
+        import time
+
+        rng = random.Random(9)
+        K = 1500
+        blocks = [bytes(rng.randrange(256) for _ in range(16)) for _ in range(K)]
+        start = time.perf_counter()
+        packets = lt_encode_blocks(blocks, seed=11, num_packets=K * 2)
+        decoded, fraction = lt_decode_blocks(packets, K, 16)
+        elapsed = time.perf_counter() - start
+        assert fraction == 1.0 and decoded == blocks
+        assert elapsed < 20.0, f"K={K} roundtrip took {elapsed:.1f}s"
+
+    def test_200kb_message_roundtrip(self):
+        import time
+
+        rng = random.Random(3)
+        payload = bytes(rng.randrange(256) for _ in range(200_000))
+        start = time.perf_counter()
+        stream = codec.pack_mckay_message(payload, "BINARY", redundancy=0.3)
+        result = codec.unpack_mckay_stream(stream)
+        elapsed = time.perf_counter() - start
+        assert result["data"] == payload
+        assert result["integrity_ok"] is True
+        assert elapsed < 60.0, f"200 KB roundtrip took {elapsed:.1f}s"
+
+
+class TestPythonVersionSupport:
+    """
+    pyproject declares `requires-python = ">=3.9"`. PEP 604 unions (`X | None`)
+    and PEP 585 builtin generics are evaluated at definition time when they
+    appear in a signature, so a module using them without
+    `from __future__ import annotations` fails to import on 3.9 even though it
+    parses fine. That is invisible on a modern interpreter and broke the 3.9
+    CI leg.
+    """
+
+    def test_no_runtime_evaluated_pep604_unions(self):
+        import pathlib
+        import re as _re
+
+        package = pathlib.Path(__file__).resolve().parent.parent / "astral"
+        offenders = []
+        signature = _re.compile(r"^\s*def .*\|", _re.MULTILINE)
+        for path in sorted(package.glob("*.py")):
+            source = path.read_text(encoding="utf-8")
+            if "from __future__ import annotations" in source:
+                continue
+            for match in signature.finditer(source):
+                line = match.group(0).strip()
+                if "|" in line.split("#")[0]:
+                    offenders.append(f"{path.name}: {line}")
+        assert not offenders, (
+            "these signatures are evaluated at import and need "
+            "`from __future__ import annotations` for Python 3.9: "
+            + "; ".join(offenders)
+        )
+
+    def test_declared_minimum_python_is_still_3_9(self):
+        import pathlib
+
+        pyproject = (
+            pathlib.Path(__file__).resolve().parent.parent / "pyproject.toml"
+        ).read_text(encoding="utf-8")
+        # If this is ever raised, the guard above can be relaxed to match.
+        assert 'requires-python = ">=3.9"' in pyproject
+
+
+class TestHeaderBoundIntegrity:
+    """
+    The checksum originally covered only the payload. A corrupt HEADER_GIST
+    atom that passed its own CRC-8 could therefore flip the gist type, which
+    selects the decoder, and still report `integrity_ok: True`: an intact TEXT
+    payload came back as a fabricated STATUS report with invented lat/lon.
+    Reported by Codex on PR #5.
+    """
+
+    @staticmethod
+    def _flip_gist_type(stream: bytes, copies=None) -> bytes:
+        from astral.crc import crc8_j1850
+
+        atoms = [bytearray(stream[i : i + 32]) for i in range(0, len(stream), 32)]
+        headers = [a for a in atoms if a[9] == container.HEADER_GIST]
+        for a in headers if copies is None else headers[:copies]:
+            a[21] ^= 0x01  # lowest bit of the gist's type field
+            a[31] = crc8_j1850(bytes(a[:31])) & 0xFF  # atom CRC-8 passes again
+        return b"".join(bytes(a) for a in atoms)
+
+    def test_checksum_covers_the_header(self):
+        payload = b"burn 12.5 s at T+0300"
+        stream = codec.pack_text_message(payload.decode())
+        damaged = self._flip_gist_type(stream)  # every copy
+        result = codec.unpack_stream(damaged)
+        assert result["integrity_ok"] is False
+        assert result["complete"] is False
+        assert result["message"] is None
+
+    def test_one_corrupt_header_copy_is_outvoted(self):
+        text = "burn 12.5 s at T+0300"
+        stream = codec.pack_text_message(text)
+        damaged = self._flip_gist_type(stream, copies=1)
+        result = codec.unpack_stream(damaged)
+        assert result["gist"]["type"] == "TEXT"
+        assert result["complete"] is True
+        assert result["integrity_ok"] is True
+        assert result["message"]["text"] == text
+
+    def test_crc_is_not_a_plain_payload_checksum(self):
+        """The stored value must depend on the header, not the payload alone."""
+        payload = b"some payload bytes"
+        stream = codec.pack_text_message(payload.decode())
+        header = next(
+            a.payload
+            for a in container.parse_atoms(stream)
+            if a.atom_type == container.HEADER_GIST
+        )
+        stored = int.from_bytes(
+            header[codec.PAYLOAD_CRC_OFFSET : codec.PAYLOAD_CRC_OFFSET + 4], "little"
+        )
+        body = b"".join(
+            a.payload[5:21]
+            for a in container.parse_atoms(stream)
+            if a.atom_type == container.FOUNTAIN_PACKET
+        )
+        assert stored != zlib.crc32(body)
+        # It is reproducible from the header and the payload together.
+        assert stored == codec.integrity_crc(header, encode_text(payload.decode()))
+
+    def test_checksum_slot_is_excluded_from_its_own_input(self):
+        header = bytes(range(21))
+        payload = b"abc"
+        a = codec.integrity_crc(header, payload)
+        mutated = bytearray(header)
+        mutated[codec.PAYLOAD_CRC_OFFSET : codec.PAYLOAD_CRC_OFFSET + 4] = b"\xff" * 4
+        assert codec.integrity_crc(bytes(mutated), payload) == a
+
+    def test_integrity_is_none_when_recovery_is_incomplete(self):
+        """`None` means not verified, which includes a partial v2 decode."""
+        stream = codec.pack_text_message("a somewhat longer message to split up")
+        atoms = [stream[i : i + 32] for i in range(0, len(stream), 32)]
+        headers_only = b"".join(
+            a for a in atoms if a[9] != container.FOUNTAIN_PACKET
+        )
+        result = codec.unpack_stream(headers_only)
+        assert result["complete"] is False
+        assert result["integrity_ok"] is None
+
+
+class TestCommandAuthentication:
+    """
+    The HMAC used to be decorative. `unpack_stream` never verified, an
+    unsigned command decoded identically to a signed one apart from a flag,
+    decoding without a key omitted the flag entirely (so `.get("auth_ok",
+    True)` failed open), and replay was unrestricted.
+    """
+
+    KEY = bytes.fromhex("00112233445566778899aabbccddeeff")
+    BURN = {"name": "BURN", "thruster_id": 1, "duration_ms": 12500}
+
+    def test_decoding_without_a_key_raises(self):
+        from astral.commands import CommandAuthError, decode_cmd, encode_cmd
+
+        with pytest.raises(CommandAuthError):
+            decode_cmd(encode_cmd(self.BURN, key=self.KEY))
+
+    def test_stripped_hmac_is_refused(self):
+        """The downgrade attack: remove the trailer and hope nobody checks."""
+        from astral.commands import CommandAuthError, decode_cmd, encode_cmd
+
+        with pytest.raises(CommandAuthError):
+            decode_cmd(encode_cmd(self.BURN), key=self.KEY)
+
+    def test_wrong_key_is_refused(self):
+        from astral.commands import CommandAuthError, decode_cmd, encode_cmd
+
+        signed = encode_cmd(self.BURN, key=self.KEY)
+        with pytest.raises(CommandAuthError):
+            decode_cmd(signed, key=b"x" * 16)
+
+    def test_unverified_results_always_say_so(self):
+        from astral.commands import decode_cmd, encode_cmd
+
+        for blob in (encode_cmd(self.BURN), encode_cmd(self.BURN, key=self.KEY)):
+            out = decode_cmd(blob, require_auth=False)
+            assert out["authenticated"] is False
+            assert out["auth_ok"] is False
+
+    def test_replay_is_rejected(self):
+        from astral.commands import (
+            CommandAuthError,
+            CommandSequencer,
+            ReplayGuard,
+            decode_cmd,
+            encode_cmd,
+        )
+
+        seq = CommandSequencer()
+        guard = ReplayGuard()
+        first = encode_cmd(self.BURN, key=self.KEY, counter=seq.next())
+        second = encode_cmd(self.BURN, key=self.KEY, counter=seq.next())
+
+        assert decode_cmd(first, key=self.KEY, replay_guard=guard)["fresh"] is True
+        assert decode_cmd(second, key=self.KEY, replay_guard=guard)["fresh"] is True
+        with pytest.raises(CommandAuthError, match="replayed"):
+            decode_cmd(first, key=self.KEY, replay_guard=guard)
+        with pytest.raises(CommandAuthError, match="replayed"):
+            decode_cmd(second, key=self.KEY, replay_guard=guard)
+
+    def test_guard_does_not_advance_on_a_rejected_command(self):
+        from astral.commands import ReplayGuard, decode_cmd, encode_cmd
+
+        guard = ReplayGuard()
+        decode_cmd(
+            encode_cmd(self.BURN, key=self.KEY, counter=5),
+            key=self.KEY,
+            replay_guard=guard,
+        )
+        assert guard.last_accepted == 5
+        with pytest.raises(Exception):
+            decode_cmd(
+                encode_cmd(self.BURN, key=b"y" * 16, counter=9),
+                key=self.KEY,
+                replay_guard=guard,
+            )
+        assert guard.last_accepted == 5  # a bad MAC must not move the window
+
+    def test_unpack_stream_verifies_commands(self):
+        from astral.commands import ReplayGuard
+
+        stream = codec.pack_cmd_message(self.BURN, key=self.KEY, counter=3)
+        guard = ReplayGuard()
+        good = codec.unpack_stream(stream, key=self.KEY, replay_guard=guard)
+        assert good["command_authenticated"] is True
+        assert good["message"]["cmd"]["duration_ms"] == 12500
+
+        replayed = codec.unpack_stream(stream, key=self.KEY, replay_guard=guard)
+        assert replayed["command_authenticated"] is False
+        assert replayed["message"] is None
+        assert "authentication failed" in replayed["error"]
+
+    def test_unpack_stream_marks_unverified_commands(self):
+        stream = codec.pack_cmd_message(self.BURN, key=self.KEY, counter=1)
+        result = codec.unpack_stream(stream)  # no key
+        assert result["command_authenticated"] is False
+        assert result["message"]["cmd"]["authenticated"] is False
+
+    def test_non_command_messages_report_none(self):
+        result = codec.unpack_stream(codec.pack_text_message("hello"))
+        assert result["command_authenticated"] is None
+
+    def test_tampered_command_body_is_refused(self):
+        from astral.commands import CommandAuthError, decode_cmd, encode_cmd
+
+        blob = bytearray(encode_cmd(self.BURN, key=self.KEY, counter=1))
+        blob[4] ^= 0x01  # change the burn duration
+        with pytest.raises(CommandAuthError):
+            decode_cmd(bytes(blob), key=self.KEY)
+
+    def test_batch_authentication(self):
+        from astral.commands import CommandAuthError, decode_cmd_batch, encode_cmd_batch
+
+        batch = {
+            "policy": {"rollback_on_fail": True},
+            "items": [{"tai_offset_s": 5, "cmd": self.BURN}],
+        }
+        signed = encode_cmd_batch(batch, key=self.KEY, counter=2)
+        out = decode_cmd_batch(signed, key=self.KEY)
+        assert out["authenticated"] is True
+        assert out["items"][0]["cmd"]["duration_ms"] == 12500
+        with pytest.raises(CommandAuthError):
+            decode_cmd_batch(encode_cmd_batch(batch), key=self.KEY)

@@ -100,7 +100,7 @@ trials per cell:
 
 ## Measured compression
 
-From `python mckay_vs_standard.py` on this repository's generated datasets:
+From `python benchmarks/mckay_vs_standard.py` on this repository's generated datasets:
 
 | Dataset | McKay | zstd -9 | LZMA -9 |
 |---|---|---|---|
@@ -164,6 +164,7 @@ entry points, so an un-built source tree cannot masquerade as the fast path.
 
 ## Related documents
 
-- [README.md](README.md): project overview, formats, CCSDS support
+- [../README.md](../README.md): project overview and measured performance
+- [FORMAT.md](FORMAT.md): the wire format specification
 - [QUICK_REFERENCE.md](QUICK_REFERENCE.md): command and API cheat sheet
 - `python -m astral.mckay_usage_example`: runnable demonstrations

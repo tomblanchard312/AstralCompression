@@ -20,6 +20,16 @@ Codec2 voice and the Rust fast path are optional extras.
 > **Inspired by**: [Atlantis Data Burst](https://www.gateworld.net/wiki/Atlantis_data_burst).
 > The name is a nod to the fiction; everything below is measured.
 
+## Documentation
+
+| Document | What it covers |
+|---|---|
+| [docs/FORMAT.md](docs/FORMAT.md) | The wire format specification: every byte, enough to reimplement |
+| [docs/INTEGRATION.md](docs/INTEGRATION.md) | McKay + ASTRAL guide, measured ratios, redundancy sizing |
+| [docs/QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md) | Command and API cheat sheet |
+| [CHANGELOG.md](CHANGELOG.md) | What changed and why |
+| [RELEASE_NOTES.md](RELEASE_NOTES.md) | This release: scope, compatibility, known limits |
+
 ## Install
 
 ```bash
@@ -57,7 +67,7 @@ result["data"]    # recovered bytes, once enough atoms arrive
 ## Measured performance
 
 Every number below is produced by a script in this repository on the datasets
-those scripts generate. Reproduce with `python mckay_vs_standard.py` and
+those scripts generate. Reproduce with `python benchmarks/mckay_vs_standard.py` and
 `python -m astral.mckay_usage_example`. Expect variation with your data.
 
 ### Compression, McKay vs general-purpose codecs
@@ -140,6 +150,21 @@ stream = pack_mckay_message(
 The default scales with message size (at least 4 copies, at least 10% of the
 fountain atom count), which is sized for ordinary links, not for 80% loss.
 
+### Throughput (pure Python, no Rust extension)
+
+| Operation | Rate |
+|---|---|
+| `pack_mckay_message`, 200 KB binary | ~0.45 s |
+| `unpack_mckay_stream`, 200 KB | ~0.57 s |
+| TM framing / deframing | ~13 MB/s |
+| Fountain encode, K=2000, 4000 packets | 27 ms |
+| Fountain decode, K=2000 | 40 ms |
+
+The fountain layer XORs symbols as big integers, indexes equations by unknown
+rather than rescanning, and draws packet indices from a sparse shuffle; the
+CRCs are table-driven. Together those took a 200 KB message from 3.9 s to
+0.45 s without changing a byte of the wire format.
+
 ### Fountain overhead
 
 Packets needed to recover K source blocks, measured over 20 seeds per K:
@@ -161,7 +186,7 @@ An atom is 32 bytes:
 | Bytes | Field |
 |---|---|
 | 0-1 | sync `0xA5 0xE6` |
-| 2 | version + flags (v1) |
+| 2 | atom format version (2: header carries the integrity CRC-32) |
 | 3-4 | atom_index (uint16 LE) |
 | 5-6 | total_atoms (uint16 LE) |
 | 7-8 | message_id (uint16 LE) |
@@ -170,8 +195,8 @@ An atom is 32 bytes:
 | 31 | CRC-8/J1850 over bytes 0-30 |
 
 - **HEADER_GIST** carries source block count K, symbol size (16), payload
-  length, fountain seed, and the packed gist bits. It is replicated; see
-  `header_redundancy_for`.
+  length, fountain seed, the packed gist bits, and a CRC-32 over the header
+  and payload together. It is replicated; see `header_redundancy_for`.
 - **MCKAY_GIST** carries the McKay version, transform, data type, original and
   compressed sizes, channel count and entropy coder. Also replicated.
 - **FOUNTAIN_PACKET** carries a packet seed, degree and a 16-byte XOR block.
@@ -182,6 +207,84 @@ A single message is limited by the 16-bit atom counters to roughly 512 KB of
 payload; `codec.max_payload_bytes()` returns the exact figure and oversized
 input raises rather than wrapping.
 
+### End-to-end integrity
+
+Each atom carries a CRC-8, which rejects 255 of every 256 corrupt atoms. The
+one that slips through is XORed into the reconstruction and silently changes
+what the receiver ends up with, so the header carries a CRC-32 covering **the
+header and the payload together**, checked before any decode is reported:
+
+```python
+result = unpack_stream(stream)
+result["integrity_ok"]   # True | False | None
+```
+
+| Value | Meaning |
+|---|---|
+| `True` | header and payload both verified against the checksum |
+| `False` | they reassembled but do not match: at least one atom was corrupt |
+| `None` | **not verified**: recovery was incomplete, or the stream predates atom format 2 |
+
+`None` is not a format-version indicator. A v2 stream that recovers only some
+of its fountain blocks also reports `None`, because there is nothing complete
+to check yet.
+
+The checksum covers the header because the header decides how the payload is
+read: the gist type selects the decoder, and K and the seed drive reassembly.
+Covering the payload alone left a gap where a corrupt header atom that passed
+its own CRC-8 could turn an intact TEXT payload into a fabricated STATUS
+report while the payload checksum still matched.
+
+Header atoms are replicated, so the decoder takes the copy the majority agree
+on. One corrupt copy is outvoted and the message decodes normally; only if
+every copy is damaged the same way does the checksum fail.
+
+A failed check is reported as `complete: False` with an `error`, never as a
+decode. The gist still comes back, so an operator learns what was sent and
+that it arrived damaged. Measured on 600-byte payloads where one corrupt atom
+reaches the solution: the check catches it, and of those cases the unchecked
+path would have returned wrong bytes as a clean decode about two thirds of
+the time (the rest raised inside the decompressor).
+
+Note that CRC-32 is an error-detecting code, not an authenticator. It catches
+noise, not tampering. Commands are authenticated separately.
+
+### Commanding
+
+Commands are the one place where a mistake is dangerous, so the API fails
+closed. Decoding a command verifies it by default, and refuses to hand back
+its contents otherwise:
+
+```python
+from astral import unpack_stream
+from astral.commands import CommandSequencer, ReplayGuard
+
+# Sender: a counter that always increases.
+seq = CommandSequencer()
+stream = pack_cmd_message(
+    {"name": "BURN", "thruster_id": 1, "duration_ms": 12500},
+    key=KEY, counter=seq.next(),
+)
+
+# Receiver: one guard per uplink key, kept across contacts.
+guard = ReplayGuard()
+result = unpack_stream(stream, key=KEY, replay_guard=guard)
+result["command_authenticated"]   # True, False, or None if not a command
+```
+
+A command that fails its HMAC, arrives without one, or repeats a counter the
+guard has already accepted is reported as an error with `message: None`. It is
+never returned as if it had been verified.
+
+Without a key, commands still decode for inspection but are tagged
+`authenticated: False`, and the CLI prints a warning to stderr. **Never act on
+such a command.** `decode_cmd` raises rather than returning an unverified
+command unless you pass `require_auth=False`.
+
+Authentication is HMAC-SHA256 over a 4-byte counter plus the command body. A
+replayed BURN is still a perfectly valid BURN, so freshness matters as much as
+authenticity: keep the `ReplayGuard` for the life of the key.
+
 ## Space communications standards
 
 ASTRAL is not a replacement for CCSDS. It is a payload format that can be
@@ -191,7 +294,7 @@ where it claims to be.
 **CCSDS 133.0-B-2 Space Packet Protocol** (`astral/spacepacket.py`)
 Six-byte primary header, 14-bit per-APID sequence counters, idle packets.
 APIDs: DETECT 0x010, STATUS 0x011, TEXT 0x012, VOICE 0x013, CMD 0x100,
-CMD_BATCH 0x101. Verified by `PHASE3_SPACEPACKET_VERIFICATION.py`.
+CMD_BATCH 0x101. Covered by `tests/test_ccsds.py`.
 
 **CCSDS 132.0-B-3 TM Transfer Frames + 131.0-B-5 randomizer** (`astral/tmframe.py`)
 1115-byte frames, ASM 0x1ACFFC1D, CRC-16-CCITT FECF, SCID/VCID, master and
@@ -207,20 +310,33 @@ field modes:
   ground-station packet extractor can reassemble the stream. Short frames are
   filled with idle packets.
 
-Verified by `PHASE5_TM_VERIFICATION.py`.
+Covered by `tests/test_ccsds.py`.
 
 **CCSDS Reed-Solomon** (`astral/rs_fec.py`, needs the `rs` extra)
 Two distinct codes, not interchangeable:
 
 - `encode_codeblock` / `decode_codeblock`: RS(255,223) and RS(255,239) over
-  GF(2^8) with the CCSDS generator (fcr=112, prim=0x187, conventional basis)
-  and symbol interleaving. At interleave 5 a 1115-byte TM frame becomes a
-  1275-byte codeblock and an 80-byte burst error is corrected exactly.
+  GF(2^8) with the CCSDS generator and symbol interleaving. At interleave 5 a
+  1115-byte TM frame becomes a 1275-byte codeblock and an 80-byte burst error
+  is corrected exactly.
+
+  The parameters are the ones that matter for interop: field polynomial
+  `0x187`, first consecutive root 112, and **primitive element alpha^11**, so
+  the generator roots are alpha^(11*(112+i)). These match Phil Karn's libfec
+  (`FCR=112, PRIM=11`), which is what gr-satellites and most ground stations
+  use. The generator polynomial was verified against an independent
+  construction using the `galois` library, and the parity bytes are frozen as
+  test vectors.
+
+  Symbols are carried in the **dual basis** by default, as CCSDS specifies;
+  pass `basis="conventional"` for libfec's `encode_rs_8` representation.
+  Mismatched bases are the classic CCSDS RS interop failure: the maths is
+  identical, the bytes on the wire are not. Both endpoints must agree.
 - `encode_stream` / `decode_stream`: RS(48,32) and RS(64,32) applied per atom,
   so a damaged atom is repaired rather than dropped by its CRC. Useful, but
   not a CCSDS codeblock.
 
-Verified by `PHASE4_RS_VERIFICATION.py`.
+Covered by `tests/test_ccsds.py`, with parity vectors in `tests/test_vectors.py`.
 
 ### What this does and does not buy you
 
@@ -292,7 +408,7 @@ binary-float and text transforms with zstd. Build it with
 `maturin build --release` inside that directory and install the wheel, or use
 the `fast` extra. Without it everything still works in pure Python.
 
-Speedups depend on your machine and data; run `python rust_vs_python_benchmark.py`
+Speedups depend on your machine and data; run `python benchmarks/rust_vs_python_benchmark.py`
 to measure yours rather than relying on a number in a README. The benchmark
 reports per-dataset timings, ratios and an average speedup.
 
@@ -300,7 +416,7 @@ reports per-dataset timings, ratios and an average speedup.
 
 ```bash
 pip install pytest reedsolo numpy
-python -m pytest tests            # 179 passed, 19 skipped without the Rust extension
+python -m pytest tests            # 264 passed, 19 skipped without the Rust extension
 python -m flake8 astral/ tests/ *.py --config=setup.cfg
 ```
 
@@ -308,8 +424,9 @@ The skipped tests are the Rust extension suite; they run in CI, where the
 wheel is built, and CI additionally asserts that the fast path is actually
 selected rather than silently falling back.
 
-Standards conformance is checked by the `PHASE*_VERIFICATION.py` scripts, which
-CI also runs.
+Wire-format stability is pinned by `tests/test_vectors.py`, whose Reed-Solomon
+vectors were produced by an independent implementation. CCSDS conformance is
+covered by `tests/test_ccsds.py`.
 
 ## Limitations
 

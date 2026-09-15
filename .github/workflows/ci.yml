@@ -39,12 +39,12 @@ jobs:
           pip install ../dist/*.whl
 
       - name: Lint with flake8
-        run: flake8 astral/ tests/ *.py --config=setup.cfg
+        run: flake8 astral/ tests/ benchmarks/ --config=setup.cfg
 
       - name: Run tests
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: pytest tests/ -v --tb=short --ignore=tests/test_rust_compress_old.py
+        run: pytest tests/ -v --tb=short
 
       - name: Verify the Rust extension is actually exercised
         env:
@@ -58,11 +58,7 @@ jobs:
           print('Rust extension active')
           "
 
-      - name: Run standards verification scripts
+      - name: Run the worked examples
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: |
-          python PHASE3_SPACEPACKET_VERIFICATION.py
-          python PHASE4_RS_VERIFICATION.py
-          python PHASE5_TM_VERIFICATION.py
-          python -m astral.mckay_usage_example
+        run: python -m astral.mckay_usage_example
