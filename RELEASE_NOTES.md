@@ -110,8 +110,10 @@ Python 3.9 through 3.13, tested on the 3.9-3.12 matrix in CI.
 
 ## Verification
 
-* 301 tests pass, 19 skip without optional extras; the suite also passes with
+* 354 tests pass, 23 skip without optional extras; the suite also passes with
   every extra absent.
+* 20 of those are interop tests in which third-party CCSDS libraries, not this
+  one, parse the frames.
 * Lint clean across the package, tests and benchmarks.
 * The decoder was fuzzed with 4,000 hostile inputs (random bytes, bit-flipped
   streams, shuffled fragments): no uncaught exceptions, nothing slower than a
@@ -123,11 +125,20 @@ Python 3.9 through 3.13, tested on the 3.9-3.12 matrix in CI.
 
 Read these before relying on it.
 
-1. **No ground-station interop test has been run.** CCSDS conformance is
-   verified against the published standards, the libfec parameters, and an
-   independent implementation of the generator polynomial. Nothing here has
-   been decoded by an actual COSMOS, OpenMCT or gr-satellites receiver. That
-   loopback is the first thing to do before an operational deployment.
+1. **Interop is verified in software, not over the air.** Two unrelated CCSDS
+   libraries parse what GistLink transmits, in
+   [`tests/test_interop.py`](tests/test_interop.py): `spacepackets` reads the
+   TM Transfer Frames and checks the Frame Error Control Field with its own
+   CRC-16, and `ccsdspy` reads the Space Packet stream a second time and
+   reports no structural faults. The derandomiser in that module is written
+   from the polynomial in the standard, not copied from this library, and it
+   reproduces the published Table 9-1 vector. What has not happened is a run
+   against a real receiver on a real link: no COSMOS, OpenMCT or
+   gr-satellites deployment, and no RF. Those would test the radio path and
+   the operator tooling, not the byte format, which is what the loopback
+   settles. The Reed-Solomon codeblock is the one layer with no third-party
+   reader available; it stays verified against the libfec parameters and an
+   independent `galois` construction.
 2. **CCSDS framing gives transport compatibility, not end-to-end decoding.** A
    ground station will synchronise, derandomise, check the FECF and route by
    APID without custom code. It will not understand the GistLink atoms inside;
@@ -163,6 +174,7 @@ Read these before relying on it.
 
 ## Next
 
-* Loopback against gr-satellites to settle interop empirically.
+* A run against a live receiver, to cover the radio path and operator tooling
+  that a software loopback cannot.
 * Publish Rust wheels for the common platforms.
 * A streaming API for payloads above the single-message ceiling.

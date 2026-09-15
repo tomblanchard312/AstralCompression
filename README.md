@@ -420,6 +420,20 @@ GistLink atoms inside: the gist, fountain decoding and decompression need
 this library (or a reimplementation of it) at the receiving end. Treat CCSDS
 support as transport compatibility, not as end-to-end interoperability.
 
+That first sentence is a claim, so it is tested. `tests/test_interop.py` has
+two unrelated CCSDS libraries parse frames GistLink produced, with none of this
+library involved in the receive path: `spacepackets` synchronises on the ASM,
+parses the TM Transfer Frame and validates the FECF with its own CRC-16, and
+`ccsdspy` reads the Space Packet stream and reports no structural faults. The
+derandomiser there is written from the polynomial in CCSDS 131.0-B rather than
+copied from `gistlink.tmframe`, and it reproduces the sequence published in
+Table 9-1. Install `spacepackets` and `ccsdspy` to run it; the tests skip
+otherwise.
+
+The one CCSDS layer with no independent reader on PyPI is the Reed-Solomon
+codeblock, which is checked against the libfec parameters and a `galois`
+construction instead.
+
 ## Data types
 
 ### TEXT

@@ -31,6 +31,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pytest flake8 reedsolo maturin zstd zstandard numpy
+          # Third-party CCSDS readers. tests/test_interop.py has them parse
+          # frames GistLink produced, so interop is asserted on every run
+          # rather than claimed. They skip if absent, hence pinning them here.
+          pip install spacepackets
+
+      - name: Install the second interop reader
+        # ccsdspy requires Python 3.10, so the 3.9 job runs the interop suite
+        # with one third-party reader instead of two. Those tests skip rather
+        # than fail, and spacepackets covers both layers on its own.
+        if: matrix.python-version != '3.9'
+        run: pip install ccsdspy
 
       - name: Build and install Rust extension
         run: |

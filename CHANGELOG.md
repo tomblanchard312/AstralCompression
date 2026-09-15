@@ -25,9 +25,34 @@ television character. Neither name said what the software does. It is now
 No back-compatibility shims are provided: nothing had been published under the
 old names, so shims would be dead weight from the first release.
 
+### Added
+- **A ground-station loopback that runs without hardware**
+  (`tests/test_interop.py`). Two unrelated CCSDS libraries parse frames this
+  library produced, with no GistLink code in the receive path:
+  `spacepackets` synchronises on the ASM, parses the TM Transfer Frame and
+  validates the Frame Error Control Field with its own CRC-16, and `ccsdspy`
+  reads the Space Packet stream and reports no structural faults. The
+  derandomiser in that module is derived from the polynomial in CCSDS
+  131.0-B rather than copied from `gistlink.tmframe`, and it reproduces the
+  sequence published in Table 9-1.
+
+  Radio hardware was never what the open question needed. "Can a receiver
+  that has never seen this format read it" is answered by the bytes, and an
+  independent parser answers it; a transmitter only adds noise to the
+  experiment. The Reed-Solomon codeblock is still the exception, because no
+  package on PyPI implements the CCSDS parameters, so it remains verified
+  against libfec's parameters and a `galois` construction.
+
+  CI installs both readers, so this is asserted on every run. The tests skip
+  rather than fail when the readers are absent; `ccsdspy` needs Python 3.10,
+  so the 3.9 job runs with one reader.
+
 ### Changed
 - The README leads with what the software does rather than a backronym, and
   the fictional framing is gone.
+- The "no ground-station interop test has been run" caveat in the release
+  notes is replaced by what is now true: interop is verified in software, and
+  what remains unverified is the radio path and the operator tooling.
 
 ## 1.1.0
 
