@@ -92,9 +92,31 @@ astral unpack-mckay out.bin recovered.txt --dict mission.dict
 | **zstd -19 + trained dictionary** | **3,650 B** |
 
 That is 20% better than the built-in transform, and it is the honest
-recommendation for message traffic. The dictionary is mission configuration:
-ship the file to both ends, version it, and keep it. A receiver without it
-reports the dictionary id it needs rather than failing generically.
+recommendation for message traffic. Set it once and forget it:
+
+```bash
+export ASTRAL_DICT=/etc/astral/mission-v1.dict   # used by pack and unpack
+```
+
+**Train it on your own traffic.** A dictionary only helps on data that
+resembles what it was trained on. Measured with a mission-vocabulary
+dictionary applied to traffic it did not match, it made JSON status messages
+8% *bigger* and log lines 2% bigger. That is why there is no built-in
+dictionary: a generic one would be a regression for most real traffic.
+
+Applying one is nevertheless safe. The compressor produces both encodings and
+sends the smaller, so a dictionary that does not fit costs nothing:
+
+| Traffic | Without dictionary | With | Result |
+|---|---|---|---|
+| Matches the training set | 3,156 B | 2,235 B | 29% better |
+| Log lines | 4,730 B | 4,730 B | falls back |
+| JSON status | 4,490 B | 4,490 B | falls back |
+
+The dictionary is mission configuration: ship the file to both ends, version
+it, and keep every version still in use, since a receiver must decode older
+traffic. A receiver without it reports the dictionary id it needs rather than
+failing generically.
 
 Requires `pip install astral-compression[dict]`.
 
@@ -462,7 +484,7 @@ reports per-dataset timings, ratios and an average speedup.
 
 ```bash
 pip install pytest reedsolo numpy
-python -m pytest tests            # 285 passed, 19 skipped without the Rust extension
+python -m pytest tests            # 301 passed, 19 skipped without the Rust extension
 python -m flake8 astral/ tests/ *.py --config=setup.cfg
 ```
 

@@ -30,6 +30,8 @@ from __future__ import annotations
 import os
 from typing import Iterable
 
+ENV_VAR = "ASTRAL_DICT"
+
 DEFAULT_DICT_SIZE = 16384
 DEFAULT_LEVEL = 19
 MIN_SAMPLES = 8
@@ -172,6 +174,47 @@ def frame_content_size(data: bytes) -> int:
         return 0
     # zstd reports an unknown size as a sentinel of all ones.
     return 0 if size is None or size == 0xFFFFFFFFFFFFFFFF else int(size)
+
+
+def configured_paths() -> list:
+    """
+    Dictionary paths from the ``ASTRAL_DICT`` environment variable.
+
+    Set it once for an operator's shell or service unit and every send and
+    receive picks the dictionary up, instead of threading ``--dict`` through
+    every invocation::
+
+        export ASTRAL_DICT=/etc/astral/mission-v3.dict
+
+    Multiple paths are separated by the platform's path separator. A receiver
+    normally lists every dictionary still in use, since it must be able to
+    decode traffic sent under older ones.
+    """
+    raw = os.environ.get(ENV_VAR, "").strip()
+    if not raw:
+        return []
+    return [p for p in raw.split(os.pathsep) if p.strip()]
+
+
+def configured_registry() -> "DictionaryRegistry":
+    """Every dictionary named by ``ASTRAL_DICT``, loaded."""
+    registry = DictionaryRegistry()
+    for path in configured_paths():
+        registry.load(path)
+    return registry
+
+
+def default_dictionary():
+    """
+    The dictionary to compress with by default: the first one configured.
+
+    Returns None when nothing is configured, which is the supported state:
+    ASTRAL works without a dictionary, just less well on short messages.
+    """
+    paths = configured_paths()
+    if not paths:
+        return None
+    return MissionDictionary.load(paths[0])
 
 
 class DictionaryRegistry:

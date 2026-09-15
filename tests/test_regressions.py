@@ -1196,3 +1196,139 @@ class TestMissionDictionaries:
         md, _dictionary, _tests = trained
         with pytest.raises(ValueError, match="at least"):
             md.train([b"one", b"two"])
+
+
+class TestDictionaryNeverHurts:
+    """
+    A dictionary is a bet that the payload resembles the traffic it was
+    trained on. Measured, a mission-vocabulary dictionary made JSON status
+    messages 8% BIGGER and log lines 2% bigger, so applying one blindly is a
+    regression for anyone whose traffic differs from the training set. The
+    compressor produces both encodings and sends the smaller.
+    """
+
+    @pytest.fixture
+    def trained(self):
+        md = pytest.importorskip("astral.dictionary")
+        if not md.available():
+            pytest.skip("requires the 'dict' extra (zstandard)")
+        rng = random.Random(1)
+        vocab = ["satellite", "telemetry", "nominal", "battery", "attitude",
+                 "payload", "thruster", "downlink", "anomaly", "critical"]
+        corpus = [
+            (" ".join(rng.choice(vocab) for _ in range(rng.randint(6, 16))) + ".").encode()
+            for _ in range(400)
+        ]
+        return md, md.train(corpus, name="mission")
+
+    @pytest.mark.parametrize(
+        "sample",
+        [
+            b'{"t":12,"sc":"KESTREL-2","mode":"SCIENCE","batt":87,"temp":-14.2}',
+            b"2026-09-15T04:11:11Z SUBSYS=EPS volt=28.4V temp=-14.2C state=NOMINAL",
+            b"The quick brown fox jumps over the lazy dog near the riverbank.",
+            bytes(range(256)),
+            b"",
+        ],
+    )
+    def test_never_larger_than_without_a_dictionary(self, trained, sample):
+        md, dictionary = trained
+        without = mckay.compress(sample, "TEXT")
+        with_dict = mckay.compress(sample, "TEXT", dictionary=dictionary)
+        assert len(with_dict) <= len(without), (
+            f"dictionary cost {len(with_dict) - len(without)} extra bytes"
+        )
+
+    def test_still_wins_on_matching_traffic(self, trained):
+        md, dictionary = trained
+        rng = random.Random(99)
+        vocab = ["satellite", "telemetry", "nominal", "battery", "attitude",
+                 "payload", "thruster", "downlink", "anomaly", "critical"]
+        msgs = [
+            (" ".join(rng.choice(vocab) for _ in range(rng.randint(6, 16))) + ".").encode()
+            for _ in range(60)
+        ]
+        without = sum(len(mckay.compress(m, "TEXT")) for m in msgs)
+        with_dict = sum(len(mckay.compress(m, "TEXT", dictionary=dictionary)) for m in msgs)
+        assert with_dict < without * 0.85
+
+    def test_fallback_output_still_roundtrips(self, trained):
+        """When the dictionary loses, the result must decode without it."""
+        md, dictionary = trained
+        sample = b'{"t":12,"sc":"KESTREL-2","mode":"SCIENCE","batt":87}'
+        blob = mckay.compress(sample, "TEXT", dictionary=dictionary)
+        assert mckay.decompress(blob) == sample  # no registry needed
+
+
+class TestDictionaryConfiguration:
+    """ASTRAL_DICT makes a trained dictionary the default without --dict."""
+
+    @pytest.fixture
+    def trained(self, tmp_path):
+        md = pytest.importorskip("astral.dictionary")
+        if not md.available():
+            pytest.skip("requires the 'dict' extra (zstandard)")
+        rng = random.Random(2)
+        vocab = ["satellite", "telemetry", "nominal", "battery", "attitude"]
+        corpus = [
+            (" ".join(rng.choice(vocab) for _ in range(10)) + ".").encode()
+            for _ in range(200)
+        ]
+        dictionary = md.train(corpus)
+        path = tmp_path / "mission.dict"
+        dictionary.save(path)
+        return md, dictionary, path
+
+    def test_unset_means_no_dictionary(self, trained, monkeypatch):
+        md, _dictionary, _path = trained
+        monkeypatch.delenv(md.ENV_VAR, raising=False)
+        assert md.configured_paths() == []
+        assert md.default_dictionary() is None
+        assert len(md.configured_registry()) == 0
+
+    def test_configured_dictionary_is_found(self, trained, monkeypatch):
+        md, dictionary, path = trained
+        monkeypatch.setenv(md.ENV_VAR, str(path))
+        assert md.default_dictionary().dict_id == dictionary.dict_id
+        assert dictionary.dict_id in md.configured_registry()
+
+    def test_several_paths(self, trained, monkeypatch, tmp_path):
+        md, dictionary, path = trained
+        second = tmp_path / "other.dict"
+        dictionary.save(second)
+        monkeypatch.setenv(md.ENV_VAR, os.pathsep.join([str(path), str(second)]))
+        assert len(md.configured_paths()) == 2
+
+    def test_cli_uses_the_configured_dictionary(self, trained, monkeypatch, tmp_path):
+        from astral.cli import main
+
+        md, dictionary, path = trained
+        monkeypatch.setenv(md.ENV_VAR, str(path))
+        source = tmp_path / "report.txt"
+        source.write_bytes(b"satellite telemetry nominal battery attitude nominal.")
+        packed, out = tmp_path / "p.bin", tmp_path / "out.txt"
+        assert main(["pack-mckay", str(source), str(packed), "--type", "TEXT"]) == 0
+        assert main(["unpack-mckay", str(packed), str(out)]) == 0
+        assert out.read_bytes() == source.read_bytes()
+
+
+class TestTextTransformRobustness:
+    """
+    `compress(data, "TEXT")` raised UnicodeDecodeError on bytes that are not
+    valid UTF-8, turning a caller's wrong type hint into a lost message. The
+    abbreviation step is skipped instead.
+    """
+
+    @pytest.mark.parametrize(
+        "sample",
+        [bytes(range(256)), b"\xff\xfe\x00binary", b"\x80\x81\x82", b""],
+    )
+    def test_non_utf8_declared_as_text(self, sample):
+        assert mckay.decompress(mckay.compress(sample, "TEXT")) == sample
+
+    def test_utf8_text_still_uses_abbreviation_coding(self):
+        """The fallback must not have disabled the transform for real text."""
+        text = ("satellite telemetry nominal battery temperature " * 40).encode()
+        blob = mckay.compress(text, "TEXT")
+        assert blob[3] == mckay.TRANSFORM_TEXT
+        assert mckay.decompress(blob) == text

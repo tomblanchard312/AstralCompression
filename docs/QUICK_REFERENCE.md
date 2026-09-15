@@ -100,9 +100,13 @@ pack_mckay_message(data, "TEXT", dictionary=d)
 unpack_mckay_stream(stream, dictionaries=registry)
 ```
 
-20% smaller than the built-in transform on short messages. Needs
-`astral-compression[dict]`. Both ends need the same file; a receiver without
-it reports `missing_dictionary` with the id.
+Or set `ASTRAL_DICT=/path/mission.dict` once and both pack and unpack use it.
+
+20% smaller than the built-in transform on traffic that matches the training
+set, and never larger on traffic that does not: both encodings are produced
+and the smaller is sent. Train on your own messages; a generic dictionary
+makes unmatched traffic bigger. Needs `astral-compression[dict]`. Both ends
+need the same file; a receiver without it reports `missing_dictionary`.
 
 ## Commanding
 

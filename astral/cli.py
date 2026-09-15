@@ -21,7 +21,12 @@ from .spacepacket import (
     wrap as sp_wrap,
 )
 from .commands import PersistentReplayGuard
-from .dictionary import DictionaryRegistry, MissionDictionary, train as train_dict
+from .dictionary import (
+    DictionaryRegistry,
+    MissionDictionary,
+    configured_paths,
+    train as train_dict,
+)
 from .voice import decode_bitstream_to_wav
 
 
@@ -261,10 +266,19 @@ def cmd_train_dict(args):
 
 
 def _load_dictionaries(paths):
+    """Dictionaries from --dict, falling back to the ASTRAL_DICT environment."""
     registry = DictionaryRegistry()
-    for path in paths or []:
+    for path in list(paths or []) or configured_paths():
         registry.load(path)
     return registry if len(registry) else None
+
+
+def _sending_dictionary(path):
+    """The dictionary to compress with: --dict, else the first configured."""
+    if path:
+        return MissionDictionary.load(path)
+    configured = configured_paths()
+    return MissionDictionary.load(configured[0]) if configured else None
 
 
 def cmd_pack_mckay(args):
@@ -274,7 +288,7 @@ def cmd_pack_mckay(args):
         hr = args.header_redundancy
         if hr is None and args.survive_loss is not None:
             hr = header_redundancy_for(args.survive_loss)
-        dictionary = MissionDictionary.load(args.dict) if args.dict else None
+        dictionary = _sending_dictionary(args.dict)
         blob = pack_mckay_message(
             data,
             data_type=args.type,
@@ -537,7 +551,10 @@ def main(argv=None):
         "--dict",
         default=None,
         metavar="PATH",
-        help="mission dictionary to compress against (see train-dict)",
+        help=(
+            "mission dictionary to compress against (see train-dict); "
+            "defaults to $ASTRAL_DICT"
+        ),
     )
     p_pack_mckay.add_argument(
         "--channels",
@@ -588,7 +605,7 @@ def main(argv=None):
         action="append",
         default=None,
         metavar="PATH",
-        help="mission dictionary to decode with; repeatable",
+        help="mission dictionary to decode with; repeatable, defaults to $ASTRAL_DICT",
     )
     p_unpack_mckay.set_defaults(func=cmd_unpack_mckay)
 

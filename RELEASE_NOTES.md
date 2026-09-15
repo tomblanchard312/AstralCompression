@@ -27,6 +27,13 @@ with `astral train-dict`, pass `--dict` to pack and unpack. The dictionary is
 shared configuration; a receiver without it reports the id it needs rather
 than failing generically. Needs `astral-compression[dict]`.
 
+Set `ASTRAL_DICT` once and both ends use it without further flags.
+
+Train on your own traffic: a dictionary only helps on data resembling its
+training set, and a mismatched one is a regression. That is measured, not
+theoretical, and it is why no built-in dictionary ships. Applying one is still
+safe, because both encodings are produced and the smaller is sent.
+
 This is the honest recommendation from benchmarking against the alternatives:
 the built-in text transform is not competitive with a dictionary-trained
 general codec, and the project is better for saying so than for defending its
@@ -98,7 +105,7 @@ Python 3.9 through 3.13, tested on the 3.9-3.12 matrix in CI.
 
 ## Verification
 
-* 285 tests pass, 19 skip without optional extras; the suite also passes with
+* 301 tests pass, 19 skip without optional extras; the suite also passes with
   every extra absent.
 * Lint clean across the package, tests and benchmarks.
 * The decoder was fuzzed with 4,000 hostile inputs (random bytes, bit-flipped

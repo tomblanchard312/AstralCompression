@@ -18,8 +18,22 @@
   A receiver lacking a dictionary reports its id, which is actionable, rather
   than failing as a generic decode error.
 
+- `ASTRAL_DICT` environment variable: name a dictionary once and every pack
+  and unpack uses it, instead of threading `--dict` through every call.
+
 ### Changed
 - New `dict` extra: `pip install astral-compression[dict]`.
+- **A dictionary can no longer make a payload larger.** Both the dictionary
+  and the built-in transform are produced and the smaller is sent. This
+  matters because a dictionary only helps on traffic resembling its training
+  set: measured, a mission-vocabulary dictionary made JSON status messages 8%
+  bigger and log lines 2% bigger. It is also why no built-in dictionary is
+  shipped, which had been the plan until it was measured.
+
+### Fixed
+- `compress(data, "TEXT")` raised `UnicodeDecodeError` on bytes that are not
+  valid UTF-8, turning a caller's wrong type hint into a lost message. The
+  abbreviation step is skipped and the data is entropy-coded instead.
 
 ## 1.0.0
 

@@ -151,14 +151,25 @@ def _compress_text(data: bytes) -> tuple[int, int, bytes]:
                 "Rust text compression failed, falling back to Python", UserWarning
             )
 
-    abbr_bytes = _text_abbrev_encode(data)
-
     candidates = [
-        (ENTROPY_ZLIB, zlib.compress(abbr_bytes, 9)),
-        (ENTROPY_LZMA, lzma.compress(abbr_bytes, preset=9)),
         (ENTROPY_ZLIB, zlib.compress(data, 9)),
         (ENTROPY_LZMA, lzma.compress(data, preset=9)),
     ]
+    try:
+        abbr_bytes = _text_abbrev_encode(data)
+    except UnicodeDecodeError:
+        # Caller said TEXT but the bytes are not UTF-8. Abbreviation coding
+        # cannot apply, but there is no reason to fail: entropy-code it and
+        # carry on. Raising here would turn a caller's wrong type hint into a
+        # lost message.
+        abbr_bytes = None
+    if abbr_bytes is not None:
+        candidates.extend(
+            [
+                (ENTROPY_ZLIB, zlib.compress(abbr_bytes, 9)),
+                (ENTROPY_LZMA, lzma.compress(abbr_bytes, preset=9)),
+            ]
+        )
     best_entropy, best = min(candidates, key=lambda x: len(x[1]))
     if len(best) >= len(data):
         return TRANSFORM_PASSTHROUGH, ENTROPY_LZMA, lzma.compress(data, preset=9)
@@ -578,16 +589,14 @@ def compress(
     if data_type == "AUTO":
         data_type = _detect_type(data)
 
+    dict_stream = None
     if dictionary is not None:
-        payload = dictionary.compress(data)
-        # Only take it if it actually helps; a dictionary aimed at text will
-        # not help a float array.
-        if len(payload) + HEADER_SIZE_V4 < len(data):
-            return (
-                MAGIC
-                + bytes([(MCKAY_VERSION_COMPACT << 4) | TRANSFORM_ZSTD_DICT])
-                + payload
-            )
+        packed = dictionary.compress(data)
+        dict_stream = (
+            MAGIC
+            + bytes([(MCKAY_VERSION_COMPACT << 4) | TRANSFORM_ZSTD_DICT])
+            + packed
+        )
 
     if data_type == "TEXT":
         tid, entropy_coder, payload = _compress_text(data)
@@ -617,6 +626,13 @@ def compress(
 
     if channels > 255:
         raise ValueError(f"channels must be 0-255, got {channels}")
+
+    if dict_stream is not None and len(dict_stream) < len(payload) + HEADER_SIZE:
+        # A dictionary is a bet that this payload resembles the traffic it was
+        # trained on. When the bet is wrong the dictionary makes things bigger,
+        # so both encodings are produced and the smaller one is sent. Supplying
+        # a dictionary can therefore never cost you bytes.
+        return dict_stream
 
     header = (
         MAGIC
