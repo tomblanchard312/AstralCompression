@@ -1332,3 +1332,58 @@ class TestTextTransformRobustness:
         blob = compress.compress(text, "TEXT")
         assert blob[3] == compress.TRANSFORM_TEXT
         assert compress.decompress(blob) == text
+
+
+class TestFountainAlwaysSolvable:
+    """
+    A randomly drawn packet set can be linearly dependent even with every
+    block covered and nothing lost. Measured before the fix: 0.5% of seeds at
+    K=3 with 13 packets produced a set that could not be decoded on a perfect
+    link, which surfaced as a 3.9 CI failure but was neither version nor
+    platform specific. For a command message that is a real loss.
+
+    The decoder derives each packet's indices from that packet's own seed, so
+    the encoder can choose seeds that span the whole message; redundant
+    packets are replaced until they do.
+    """
+
+    @pytest.mark.parametrize("K,M", [(1, 11), (2, 12), (3, 13), (5, 15),
+                                     (8, 18), (20, 40), (64, 128)])
+    def test_every_complete_packet_set_decodes(self, K, M):
+        blocks = [bytes([i % 256]) * 16 for i in range(K)]
+        for seed in range(1, 400):
+            packets = lt_encode_blocks(blocks, seed=seed, num_packets=M)
+            decoded, fraction = lt_decode_blocks(packets, K, 16)
+            assert decoded == blocks, (
+                f"K={K} seed={seed} did not decode with all {M} packets "
+                f"present (recovered {fraction:.2f})"
+            )
+
+    def test_command_messages_always_decode_on_a_clean_link(self):
+        """The end-to-end shape of the CI failure."""
+        key = b"k" * 16
+        burn = {"name": "BURN", "thruster_id": 1, "duration_ms": 12500}
+        for _ in range(300):
+            stream = codec.pack_cmd_message(burn, key=key, counter=1)
+            result = codec.unpack_stream(stream)
+            assert result["command_authenticated"] is False, result.get("error")
+
+    def test_large_messages_skip_the_guarantee(self):
+        """It costs O(M*K) and the risk it covers is unmeasurable up there."""
+        from gistlink import fountain
+
+        assert fountain.RANK_GUARANTEE_MAX_K == 512
+
+    def test_decoder_is_unchanged_by_the_guarantee(self):
+        """
+        The repair only changes which seeds the encoder emits. A decoder that
+        knows nothing about it must still decode, which is what keeps this a
+        non-breaking change.
+        """
+        blocks = [bytes([i]) * 16 for i in range(6)]
+        packets = lt_encode_blocks(blocks, seed=11, num_packets=16)
+        for packet_seed, degree, payload in packets:
+            assert 0 <= packet_seed <= 0xFFFFFFFF
+            assert 1 <= degree <= len(blocks)
+            assert len(payload) == 16
+        assert lt_decode_blocks(packets, 6, 16)[0] == blocks

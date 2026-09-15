@@ -3,14 +3,6 @@
 version = 4
 
 [[package]]
-name = "astral_compress"
-version = "0.1.0"
-dependencies = [
- "pyo3",
- "zstd",
-]
-
-[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -50,6 +42,14 @@ dependencies = [
  "libc",
  "r-efi",
  "wasip2",
+]
+
+[[package]]
+name = "gistlink_native"
+version = "0.1.0"
+dependencies = [
+ "pyo3",
+ "zstd",
 ]
 
 [[package]]

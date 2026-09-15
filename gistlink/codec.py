@@ -681,6 +681,7 @@ def unpack_stream(
     )
     decompressed = None
     integrity = None
+    decode_error = None
 
     if packets:
         recovered, frac = lt_decode_blocks(packets, K, symbol_size)
@@ -795,9 +796,14 @@ def unpack_stream(
                     "command_authenticated": False,
                     "error": f"command authentication failed: {exc}",
                 }
-            except Exception:
+            except Exception as exc:
+                # The payload reassembled but could not be interpreted. Record
+                # why: swallowing this silently makes a decode failure
+                # indistinguishable from "not enough atoms yet", which is a
+                # different problem with a different remedy.
                 complete = False
                 message = None
+                decode_error = f"{type(exc).__name__}: {exc}"
 
     return {
         "message_id": msg_id,
@@ -811,6 +817,7 @@ def unpack_stream(
         "data": decompressed,
         "integrity_ok": integrity,
         "command_authenticated": _command_auth_state(message),
+        **({"error": decode_error} if decode_error else {}),
     }
 
 
