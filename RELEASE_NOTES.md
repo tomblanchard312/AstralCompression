@@ -152,7 +152,11 @@ Read these before relying on it.
    race. Treat the state file as security state: deleting it disables replay
    protection.
 8. **Voice needs `pycodec2`**, and those paths are not exercised in CI.
-9. **The Rust extension is not published as a wheel.** Build it with
+9. **Publishing has never been exercised end to end.** The workflow now
+   builds and verifies the package before publishing, but no release has been
+   cut, so the first `pip install gistlink` from PyPI will be the first real
+   test of it.
+10. **The Rust extension is not published as a wheel.** Build it with
    `maturin build --release` in `gistlink_native/`. The pure Python path is
    the supported one.
 

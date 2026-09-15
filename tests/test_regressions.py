@@ -1512,3 +1512,57 @@ class TestPackagingExtras:
         blob = compress.compress(data, "TEXT")
         assert blob[3] == compress.TRANSFORM_PASSTHROUGH
         assert compress.decompress(blob) == data
+
+
+class TestReleaseWorkflow:
+    """
+    The release workflow built only the native extension and published that.
+    A release would therefore have shipped the accelerator without the library,
+    the CLI, or anything importable as `gistlink`: `pip install gistlink` could
+    not have worked. Raised in review on PR #6.
+
+    A broken release pipeline only reveals itself at release time, which is the
+    worst moment to find it, so it is asserted here instead.
+    """
+
+    def _workflow(self):
+        import pathlib
+
+        yaml = pytest.importorskip("yaml")
+        path = (pathlib.Path(__file__).resolve().parent.parent
+                / ".github" / "workflows" / "build_wheels.yml")
+        return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+    def test_the_root_package_is_built(self):
+        workflow = self._workflow()
+        steps = [
+            step.get("run", "")
+            for job in workflow["jobs"].values()
+            for step in job.get("steps", [])
+        ]
+        assert any("python -m build" in run for run in steps), (
+            "no job builds the gistlink package itself; a release would "
+            "publish the native extension without the library"
+        )
+
+    def test_the_publish_job_waits_for_the_package(self):
+        workflow = self._workflow()
+        release = workflow["jobs"]["release"]
+        assert "build_package" in release["needs"]
+
+    def test_the_publish_job_refuses_a_set_without_the_package(self):
+        """A guard beats a convention: publishing is not reversible."""
+        workflow = self._workflow()
+        runs = " ".join(
+            step.get("run", "") for step in workflow["jobs"]["release"]["steps"]
+        )
+        assert "gistlink-*.whl" in runs and "gistlink-*.tar.gz" in runs
+
+    def test_the_built_wheel_is_verified_before_publishing(self):
+        workflow = self._workflow()
+        runs = " ".join(
+            step.get("run", "")
+            for step in workflow["jobs"]["build_package"]["steps"]
+        )
+        assert "twine check" in runs
+        assert "unpack_compressed_stream" in runs, "the wheel is not smoke-tested"

@@ -50,6 +50,15 @@ old names, so shims would be dead weight from the first release.
 - `GISTLINK_DICT` environment variable: name a dictionary once and every pack
   and unpack uses it, instead of threading `--dict` through every call.
 
+### Fixed (release process)
+- **The release workflow never built the package it releases.** It ran maturin
+  in `gistlink_native/` and published only that, so a release would have
+  shipped the Rust accelerator without the library, the CLI, or anything
+  importable as `gistlink`. It now builds the wheel and sdist, checks them
+  with twine, installs the wheel into a clean environment and exercises both
+  the API and the console script before publishing, and refuses to publish a
+  set that does not contain the package itself. Raised in review on PR #6.
+
 ### Changed
 - New `dict` extra: `pip install gistlink[dict]`.
 - **A dictionary can no longer make a payload larger.** Both the dictionary
