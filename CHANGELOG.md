@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.1.0
+
+### Added
+- **Mission dictionaries** (`astral.dictionary`): trained zstd dictionaries
+  for short messages, which is where a general compressor has least context
+  and where ASTRAL is meant to operate. Measured on 100 short messages
+  compressed individually: 7,049 bytes with plain zstd -19, 4,578 with the
+  built-in text transform, 3,650 with a trained dictionary. `train-dict` on
+  the CLI, `--dict` on `pack-mckay` and `unpack-mckay`, and `dictionary=` /
+  `dictionaries=` on the Python API.
+- A compact three-byte container (McKay format 4) for the dictionary
+  transform. A zstd frame already records its decompressed size and the
+  dictionary it needs, so the ten-byte v3 header was pure duplication, and at
+  23% of a typical 33-byte compressed message it was not affordable.
+- `MissingDictionaryError` and a `missing_dictionary` key on decode results.
+  A receiver lacking a dictionary reports its id, which is actionable, rather
+  than failing as a generic decode error.
+
+### Changed
+- New `dict` extra: `pip install astral-compression[dict]`.
+
 ## 1.0.0
 
 See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the release summary, compatibility

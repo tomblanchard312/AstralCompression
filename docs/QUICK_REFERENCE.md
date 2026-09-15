@@ -83,6 +83,27 @@ data, corrected, ok = rs_fec.decode_codeblock(block)
 | 60% | 10 |
 | 80% | 21 |
 
+## Mission dictionaries
+
+```bash
+astral train-dict "samples/*.txt" -o mission.dict [--size 16384]
+astral pack-mckay in.txt out.bin --type TEXT --dict mission.dict
+astral unpack-mckay out.bin recovered.txt --dict mission.dict
+```
+
+```python
+from astral.dictionary import train, MissionDictionary, DictionaryRegistry
+d = train(list_of_sample_messages)      # a few hundred real messages
+d.save("mission.dict")
+registry = DictionaryRegistry(); registry.load("mission.dict")
+pack_mckay_message(data, "TEXT", dictionary=d)
+unpack_mckay_stream(stream, dictionaries=registry)
+```
+
+20% smaller than the built-in transform on short messages. Needs
+`astral-compression[dict]`. Both ends need the same file; a receiver without
+it reports `missing_dictionary` with the id.
+
 ## Commanding
 
 ```python

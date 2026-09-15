@@ -9,6 +9,15 @@ import struct
 import warnings
 import zlib
 
+
+class MissingDictionaryError(ValueError):
+    """Raised when a payload names a mission dictionary the receiver lacks."""
+
+    def __init__(self, message: str, dict_id: int) -> None:
+        super().__init__(message)
+        self.dict_id = dict_id
+
+
 MCKAY_VERSION: int = 3
 
 TRANSFORM_PASSTHROUGH = 0x00
@@ -16,6 +25,7 @@ TRANSFORM_TEXT = 0x01
 TRANSFORM_TELEMETRY = 0x02
 TRANSFORM_VOICE_C2 = 0x03
 TRANSFORM_BINARY_FLOAT = 0x04
+TRANSFORM_ZSTD_DICT = 0x05  # zstd with a trained mission dictionary
 
 ENTROPY_LZMA = 0x00
 ENTROPY_ZLIB = 0x01
@@ -24,6 +34,13 @@ ENTROPY_NONE = 0xFF
 
 # v3 header: MAGIC(2) version(1) transform(1) orig_len(4, LE) channels(1) entropy(1)
 HEADER_SIZE = 10
+# v4 compact header: MAGIC(2) then (version << 4) | transform, and nothing
+# else. Used only where the payload is self-describing, which today means the
+# zstd dictionary transform: a zstd frame records both its decompressed size
+# and the dictionary it needs. A 10-byte header on a 33-byte message was 23%
+# of the stream, which is indefensible on a link this format exists to serve.
+HEADER_SIZE_V4 = 3
+MCKAY_VERSION_COMPACT = 4
 # v2 header was identical except orig_len was 2 bytes, capping the recoverable
 # original length at 65535 and silently truncating anything larger.
 HEADER_SIZE_V2 = 8
@@ -527,8 +544,18 @@ def compress(
     data_type: str = "AUTO",
     voice_bps: int = 1200,
     channels: int = 0,
+    dictionary=None,
 ) -> bytes:
-    """Compress data using the McKay domain-aware pipeline (writes format v3)."""
+    """
+    Compress data using the McKay domain-aware pipeline (writes format v3).
+
+    ``dictionary`` is a :class:`astral.dictionary.MissionDictionary`. When
+    given, the payload is compressed with zstd against that dictionary, which
+    on short mission messages beats every transform here: a general codec has
+    no context inside a 90-byte report, and the dictionary supplies it. The
+    resulting frame records which dictionary it needs, so the receiver can
+    say so precisely if it is missing.
+    """
     if not isinstance(data, bytes):
         raise TypeError("data must be bytes")
 
@@ -550,6 +577,17 @@ def compress(
 
     if data_type == "AUTO":
         data_type = _detect_type(data)
+
+    if dictionary is not None:
+        payload = dictionary.compress(data)
+        # Only take it if it actually helps; a dictionary aimed at text will
+        # not help a float array.
+        if len(payload) + HEADER_SIZE_V4 < len(data):
+            return (
+                MAGIC
+                + bytes([(MCKAY_VERSION_COMPACT << 4) | TRANSFORM_ZSTD_DICT])
+                + payload
+            )
 
     if data_type == "TEXT":
         tid, entropy_coder, payload = _compress_text(data)
@@ -600,10 +638,18 @@ def _parse_header(data: bytes) -> tuple[int, int, int, int, int, bytes]:
     """
     if not isinstance(data, bytes):
         raise TypeError("data must be bytes")
-    if len(data) < HEADER_SIZE_V2:
+    if len(data) < HEADER_SIZE_V4:
         raise ValueError(f"Too short for McKay header: {len(data)} bytes")
     if data[:2] != MAGIC:
         raise ValueError(f"Bad magic: {data[:2]!r} (expected b'MK')")
+    if (data[2] >> 4) != MCKAY_VERSION_COMPACT and len(data) < HEADER_SIZE_V2:
+        raise ValueError(f"Too short for McKay header: {len(data)} bytes")
+
+    version = data[2] >> 4
+    if version == MCKAY_VERSION_COMPACT:
+        tid = data[2] & 0x0F
+        # Length and dictionary id both live in the payload itself.
+        return version, tid, 0, 0, ENTROPY_ZSTD, data[HEADER_SIZE_V4:]
 
     version = data[2]
     tid = data[3]
@@ -624,9 +670,30 @@ def _parse_header(data: bytes) -> tuple[int, int, int, int, int, bytes]:
     return version, tid, orig_len, channels, entropy_coder, payload
 
 
-def decompress(data: bytes) -> bytes:
-    """Decompress a McKay compressed stream (v2 or v3)."""
+def decompress(data: bytes, dictionaries=None) -> bytes:
+    """
+    Decompress a McKay compressed stream (v2 or v3).
+
+    ``dictionaries`` is a :class:`astral.dictionary.DictionaryRegistry`,
+    needed only for payloads compressed against a mission dictionary. A
+    payload that names a dictionary the registry lacks raises with the id, so
+    the operator knows which artifact to fetch.
+    """
     _version, tid, orig_len, channels, entropy_coder, payload = _parse_header(data)
+
+    if tid == TRANSFORM_ZSTD_DICT:
+        from .dictionary import DictionaryRegistry, frame_dict_id
+
+        dict_id = frame_dict_id(payload)
+        registry = dictionaries or DictionaryRegistry()
+        try:
+            dictionary = registry.require(dict_id)
+        except KeyError as exc:
+            raise MissingDictionaryError(str(exc).strip("'"), dict_id) from exc
+        out = dictionary.decompress(payload)
+        if orig_len:  # v3-style header carrying an explicit length
+            return _verify_length(out, orig_len, _version, "ZSTD_DICT")
+        return out
 
     # Select decompressor based on entropy coder
     def _entropy_decompress(payload: bytes) -> bytes:
@@ -752,12 +819,19 @@ def stats(compressed: bytes) -> dict:
         )
     except (TypeError, ValueError) as exc:
         return {"error": str(exc)}
+
+    if tid == TRANSFORM_ZSTD_DICT and not orig_len:
+        # The compact header stores no length; the zstd frame carries it.
+        from .dictionary import frame_content_size
+
+        orig_len = frame_content_size(payload)
     names = {
         TRANSFORM_PASSTHROUGH: "passthrough",
         TRANSFORM_TEXT: "text",
         TRANSFORM_TELEMETRY: "telemetry",
         TRANSFORM_VOICE_C2: "voice_codec2",
         TRANSFORM_BINARY_FLOAT: "binary_float",
+        TRANSFORM_ZSTD_DICT: "zstd_dict",
     }
     # Report the size of the whole stream, header included: that is what has
     # to be transmitted, so it is what the ratio should be measured against.

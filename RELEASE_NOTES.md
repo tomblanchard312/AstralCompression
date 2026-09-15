@@ -1,4 +1,4 @@
-# ASTRAL 1.0.0
+# ASTRAL 1.1.0
 
 First release with a specified wire format, frozen test vectors, and a
 security review of the command path.
@@ -17,6 +17,20 @@ research, and payload software on a Linux-class board.
 **Not supported:** flight software on a primary mission. This is pure Python
 with no software assurance regime behind it, and no flight heritage. See
 "Scope and limits" below before designing it into anything that flies.
+
+## New in 1.1.0
+
+**Mission dictionaries.** A trained zstd dictionary beats every built-in
+transform on short messages, which is the traffic this format exists for:
+3,650 bytes against 4,578 for 100 short mission reports, 20% better. Train
+with `astral train-dict`, pass `--dict` to pack and unpack. The dictionary is
+shared configuration; a receiver without it reports the id it needs rather
+than failing generically. Needs `astral-compression[dict]`.
+
+This is the honest recommendation from benchmarking against the alternatives:
+the built-in text transform is not competitive with a dictionary-trained
+general codec, and the project is better for saying so than for defending its
+own transform.
 
 ## Highlights
 
@@ -74,6 +88,7 @@ down from 3.9 s, with no change to the wire format.
 ```bash
 pip install astral-compression            # core, no dependencies
 pip install astral-compression[rs]        # + Reed-Solomon
+pip install astral-compression[dict]      # + mission dictionaries
 pip install astral-compression[voice]     # + Codec2 voice
 pip install astral-compression[fast]      # + Rust extension and zstd
 pip install astral-compression[all]
@@ -83,7 +98,7 @@ Python 3.9 through 3.13, tested on the 3.9-3.12 matrix in CI.
 
 ## Verification
 
-* 274 tests pass, 19 skip without optional extras; the suite also passes with
+* 285 tests pass, 19 skip without optional extras; the suite also passes with
   every extra absent.
 * Lint clean across the package, tests and benchmarks.
 * The decoder was fuzzed with 4,000 hostile inputs (random bytes, bit-flipped
@@ -109,7 +124,11 @@ Read these before relying on it.
 3. **Telemetry compression is lossy** by design (Q12 quantisation, about
    1.2e-4 relative error). Use `BINARY` when you need bit-exact floats.
 4. **One message is capped near 512 KB** by the 16-bit atom counters. There is
-   no streaming API for larger payloads yet.
+   no streaming API for larger payloads yet. There is also a floor: the
+   smallest message costs about 19 atoms (608 bytes) once header replication,
+   the gist and the minimum fountain redundancy are counted. Below a kilobyte
+   the framing dominates and compression barely matters; tune
+   `min_redundancy` and `header_redundancy` instead.
 5. **The gist survives only as long as one header atom does.** Size
    `header_redundancy` for the loss your link actually sees;
    `header_redundancy_for(0.8)` returns 21 copies for 99% survival at 80% loss.

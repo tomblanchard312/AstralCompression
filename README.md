@@ -35,6 +35,7 @@ Codec2 voice and the Rust fast path are optional extras.
 ```bash
 pip install astral-compression            # core, no dependencies
 pip install astral-compression[rs]        # + Reed-Solomon (reedsolo)
+pip install astral-compression[dict]      # + mission dictionaries (zstandard)
 pip install astral-compression[voice]     # + Codec2 voice (pycodec2, numpy)
 pip install astral-compression[fast]      # + Rust extension and zstd
 pip install astral-compression[all]       # everything
@@ -70,6 +71,33 @@ Every number below is produced by a script in this repository on the datasets
 those scripts generate. Reproduce with `python benchmarks/mckay_vs_standard.py` and
 `python -m astral.mckay_usage_example`. Expect variation with your data.
 
+### Mission dictionaries: the biggest win on short messages
+
+A general compressor has nothing to work with inside a 90-byte status report;
+the patterns that make mission traffic compressible live *between* messages.
+Train a dictionary on past traffic and hand it to both ends:
+
+```bash
+astral train-dict "samples/*.txt" -o mission.dict
+astral pack-mckay report.txt out.bin --type TEXT --dict mission.dict
+astral unpack-mckay out.bin recovered.txt --dict mission.dict
+```
+
+100 short mission messages, compressed individually:
+
+| Method | Total |
+|---|---|
+| zstd -19, no dictionary | 7,049 B |
+| built-in text transform | 4,578 B |
+| **zstd -19 + trained dictionary** | **3,650 B** |
+
+That is 20% better than the built-in transform, and it is the honest
+recommendation for message traffic. The dictionary is mission configuration:
+ship the file to both ends, version it, and keep it. A receiver without it
+reports the dictionary id it needs rather than failing generically.
+
+Requires `pip install astral-compression[dict]`.
+
 ### Compression, McKay vs general-purpose codecs
 
 | Dataset | McKay | zstd -9 | LZMA -9 | Notes |
@@ -92,8 +120,13 @@ Includes the header, the gist and all fountain redundancy:
 | Mission text | 9,600 B | 736 B | 13.0x |
 | Telemetry (1 channel, float32) | 32,000 B | 8,448 B | 3.8x |
 
-Small messages *expand*: `examples/detect.json` is 146 bytes of JSON and ships
-as 480 bytes in 15 atoms.
+Small messages *expand*, and there is a floor: the minimum message is around
+19 atoms (608 bytes) once header replication, the metadata gist and the
+minimum fountain redundancy are counted, however small the payload.
+`examples/detect.json` is 146 bytes of JSON and ships as 480 bytes in 15
+atoms. That floor is the price of surviving loss, not waste, but it means
+compression barely matters below a kilobyte: at those sizes tune
+`min_redundancy` and `header_redundancy` instead.
 
 The wire cost is predictable, so you can work out in advance whether ASTRAL
 pays for a given payload:
@@ -429,7 +462,7 @@ reports per-dataset timings, ratios and an average speedup.
 
 ```bash
 pip install pytest reedsolo numpy
-python -m pytest tests            # 274 passed, 19 skipped without the Rust extension
+python -m pytest tests            # 285 passed, 19 skipped without the Rust extension
 python -m flake8 astral/ tests/ *.py --config=setup.cfg
 ```
 

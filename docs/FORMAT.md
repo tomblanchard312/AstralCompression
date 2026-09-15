@@ -348,7 +348,36 @@ transform payload.
 | 9 | 1 | Entropy coder |
 
 Transform ids: 0 passthrough, 1 text, 2 telemetry, 3 Codec2 voice, 4 binary
-float. Entropy coders: 0 LZMA, 1 zlib, 2 zstd, 0xFF none.
+float, 5 zstd with a mission dictionary. Entropy coders: 0 LZMA, 1 zlib,
+2 zstd, 0xFF none.
+
+### 8.2 Compact container (format 4)
+
+Transform 5 uses a three-byte container instead, because its payload already
+describes itself:
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 2 | Magic `MK` |
+| 2 | 1 | `(4 << 4) | transform`, so `0x45` for the dictionary transform |
+| 3 | .. | A bare zstd frame |
+
+The zstd frame records both its decompressed size and the id of the
+dictionary it needs, so a length field and an entropy field would be
+duplication. This matters: the ten-byte v3 header was 23% of a typical
+33-byte compressed status message.
+
+A reader distinguishes the two containers by the high nibble of byte 2. For
+v1 to v3 that byte is the version (1, 2 or 3); for the compact container it is
+4. Since no v3 transform id reaches 0x40, the encodings cannot be confused.
+
+### 8.3 Mission dictionaries
+
+A dictionary is a zstd dictionary trained on representative traffic, shared
+out of band and identified by the id zstd stamps into every frame. A receiver
+that lacks it must report the id rather than a generic decode failure: the
+operator needs to know which artifact to fetch. It cannot be derived from the
+payload, so treat it as mission configuration and version it.
 
 Format 2 is identical except the original length is 2 bytes, capping it at
 65535; readers should accept it, and must reject a version 2 stream whose

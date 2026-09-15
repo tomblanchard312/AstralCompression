@@ -21,6 +21,7 @@ from .spacepacket import (
     wrap as sp_wrap,
 )
 from .commands import PersistentReplayGuard
+from .dictionary import DictionaryRegistry, MissionDictionary, train as train_dict
 from .voice import decode_bitstream_to_wav
 
 
@@ -235,6 +236,37 @@ def cmd_pack_cmd_batch(args):
     return 0
 
 
+def cmd_train_dict(args):
+    """Train a mission dictionary from sample messages."""
+    try:
+        import glob as _glob
+
+        paths = []
+        for pattern in args.samples:
+            matched = sorted(_glob.glob(pattern))
+            paths.extend(matched if matched else [pattern])
+        samples = [read_bin(p) for p in paths]
+        dictionary = train_dict(samples, size=args.size, name=args.output)
+        dictionary.save(args.output)
+        print(
+            f"Trained on {len(samples)} samples "
+            f"({sum(len(s) for s in samples):,} bytes) -> {args.output}"
+        )
+        print(f"  dictionary id {dictionary.dict_id}, {len(dictionary.to_bytes()):,} bytes")
+        print("  Ship this file to both ends; a receiver without it cannot decode.")
+    except Exception as e:
+        print(f"Error training dictionary: {e}")
+        return 1
+    return 0
+
+
+def _load_dictionaries(paths):
+    registry = DictionaryRegistry()
+    for path in paths or []:
+        registry.load(path)
+    return registry if len(registry) else None
+
+
 def cmd_pack_mckay(args):
     """Compress a file with McKay and send it as gist-first atoms."""
     try:
@@ -242,9 +274,11 @@ def cmd_pack_mckay(args):
         hr = args.header_redundancy
         if hr is None and args.survive_loss is not None:
             hr = header_redundancy_for(args.survive_loss)
+        dictionary = MissionDictionary.load(args.dict) if args.dict else None
         blob = pack_mckay_message(
             data,
             data_type=args.type,
+            dictionary=dictionary,
             extra_fountain=args.extra,
             channels=args.channels,
             min_redundancy=args.min_redundancy,
@@ -267,7 +301,9 @@ def cmd_pack_mckay(args):
 def cmd_unpack_mckay(args):
     """Decode a McKay atom stream, writing the recovered bytes out."""
     try:
-        result = unpack_mckay_stream(read_bin(args.input))
+        result = unpack_mckay_stream(
+            read_bin(args.input), dictionaries=_load_dictionaries(args.dict)
+        )
         data = result.get("data")
         if data is not None and args.output:
             write_bin(args.output, data)
@@ -471,6 +507,19 @@ def main(argv=None):
     )
     p_sim.set_defaults(func=cmd_simulate)
 
+    p_train = sub.add_parser(
+        "train-dict",
+        help="train a mission dictionary from sample messages",
+    )
+    p_train.add_argument(
+        "samples", nargs="+", help="sample message files (globs accepted)"
+    )
+    p_train.add_argument("-o", "--output", required=True, help="dictionary file")
+    p_train.add_argument(
+        "--size", type=int, default=16384, help="dictionary size in bytes"
+    )
+    p_train.set_defaults(func=cmd_train_dict)
+
     p_pack_mckay = sub.add_parser(
         "pack-mckay",
         help="compress a file with McKay and pack it as gist-first atoms",
@@ -484,6 +533,12 @@ def main(argv=None):
         help="data type hint for the compressor (default: AUTO)",
     )
     p_pack_mckay.add_argument("--extra", type=int, default=0)
+    p_pack_mckay.add_argument(
+        "--dict",
+        default=None,
+        metavar="PATH",
+        help="mission dictionary to compress against (see train-dict)",
+    )
     p_pack_mckay.add_argument(
         "--channels",
         type=int,
@@ -528,6 +583,13 @@ def main(argv=None):
     )
     p_unpack_mckay.add_argument("input")
     p_unpack_mckay.add_argument("output", nargs="?", default=None)
+    p_unpack_mckay.add_argument(
+        "--dict",
+        action="append",
+        default=None,
+        metavar="PATH",
+        help="mission dictionary to decode with; repeatable",
+    )
     p_unpack_mckay.set_defaults(func=cmd_unpack_mckay)
 
     p_wrap_sp = sub.add_parser(

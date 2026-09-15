@@ -16,6 +16,7 @@ from .commands import (
     encode_cmd_batch,
     decode_cmd_batch,
 )
+from .mckay_astral_integration import MissingDictionaryError
 from .voice import encode_wav_to_bitstream
 from .dict_update import split_words_from_atoms, make_dict_update_atoms
 from .fountain import lt_encode_blocks, lt_decode_blocks
@@ -498,6 +499,7 @@ def pack_mckay_message(
     channels: int = 0,
     header_redundancy: int | None = None,
     redundancy: float = 1.0,
+    dictionary=None,
 ) -> bytes:
     """
     Compress with McKay, then send the result as gist-first atomized packets.
@@ -533,7 +535,11 @@ def pack_mckay_message(
         )
 
     compressed = mckay.compress(
-        data, data_type=data_type, voice_bps=voice_bps, channels=channels
+        data,
+        data_type=data_type,
+        voice_bps=voice_bps,
+        channels=channels,
+        dictionary=dictionary,
     )
     version, transform_id, orig_len, ch, entropy_coder, _payload = mckay._parse_header(
         compressed
@@ -546,7 +552,8 @@ def pack_mckay_message(
         version,
         transform_id,
         resolved_type,
-        orig_len,
+        # The compact container declares no length; we know it here regardless.
+        orig_len or len(data),
         len(compressed),
         ch,
         entropy_coder,
@@ -564,15 +571,18 @@ def pack_mckay_message(
     )
 
 
-def unpack_mckay_stream(stream: bytes) -> dict:
+def unpack_mckay_stream(stream: bytes, dictionaries=None) -> dict:
     """
     Decode a stream produced by :func:`pack_mckay_message`.
 
     Returns the same keys as :func:`unpack_stream` plus ``mckay`` (the
     metadata gist, present whenever any MCKAY_GIST atom survived) and
     ``data`` (the decompressed bytes, present only on full recovery).
+
+    ``dictionaries`` is a :class:`astral.dictionary.DictionaryRegistry`,
+    required when the payload was compressed against a mission dictionary.
     """
-    result = unpack_stream(stream)
+    result = unpack_stream(stream, dictionaries=dictionaries)
     if "error" in result:
         return result
     if result.get("mckay") is None:
@@ -580,7 +590,12 @@ def unpack_mckay_stream(stream: bytes) -> dict:
     return result
 
 
-def unpack_stream(stream: bytes, key: bytes | None = None, replay_guard=None):
+def unpack_stream(
+    stream: bytes,
+    key: bytes | None = None,
+    replay_guard=None,
+    dictionaries=None,
+):
     """
     Decode an ASTRAL stream.
 
@@ -700,7 +715,9 @@ def unpack_stream(stream: bytes, key: bytes | None = None, replay_guard=None):
                 if mckay_gist is not None:
                     from . import mckay_astral_integration as mckay
 
-                    decompressed = mckay.decompress(payload)
+                    decompressed = mckay.decompress(
+                        payload, dictionaries=dictionaries
+                    )
                     message = {
                         "type": "MCKAY",
                         "data_type": mckay_gist["data_type"],
@@ -740,6 +757,23 @@ def unpack_stream(stream: bytes, key: bytes | None = None, replay_guard=None):
                 else:
                     message = decode_payload(payload)
                 complete = True
+            except MissingDictionaryError as exc:
+                # "fetch dictionary 214677415" is actionable; a bare decode
+                # failure is not.
+                return {
+                    "message_id": msg_id,
+                    "total_atoms": total_atoms,
+                    "received_atoms": len(atoms),
+                    "gist": gist,
+                    "mckay": mckay_gist,
+                    "complete": False,
+                    "recovered_fraction": recovered_fraction,
+                    "message": None,
+                    "data": None,
+                    "integrity_ok": integrity,
+                    "missing_dictionary": exc.dict_id,
+                    "error": str(exc),
+                }
             except CommandAuthError as exc:
                 # A command that cannot be authenticated must not look like a
                 # decode that merely failed for lack of atoms.

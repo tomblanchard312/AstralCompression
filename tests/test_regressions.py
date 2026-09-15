@@ -1087,3 +1087,112 @@ class TestPersistentReplayGuard:
         )
         assert second["command_authenticated"] is False
         assert "replayed" in second["error"]
+
+
+class TestMissionDictionaries:
+    """
+    Short messages are where a general compressor has least to work with, and
+    where ASTRAL is meant to operate. A dictionary trained on past traffic
+    gives the compressor the cross-message context it otherwise lacks.
+    """
+
+    WORDS = ["satellite", "telemetry", "nominal", "battery", "temperature",
+             "attitude", "command", "systems", "payload", "critical"]
+
+    def _corpus(self, n=400, seed=5):
+        rng = random.Random(seed)
+        return [
+            (" ".join(rng.choice(self.WORDS) for _ in range(rng.randint(6, 14))) + ".").encode()
+            for _ in range(n)
+        ]
+
+    @pytest.fixture
+    def trained(self):
+        md = pytest.importorskip("astral.dictionary")
+        if not md.available():
+            pytest.skip("requires the 'dict' extra (zstandard)")
+        corpus = self._corpus()
+        return md, md.train(corpus[:300], name="test-v1"), corpus[300:]
+
+    def test_beats_the_builtin_transform_on_short_messages(self, trained):
+        md, dictionary, tests = trained
+        plain = sum(len(mckay.compress(m, "TEXT")) for m in tests)
+        dicted = sum(len(mckay.compress(m, "TEXT", dictionary=dictionary)) for m in tests)
+        assert dicted < plain * 0.9, f"dictionary gave {dicted} vs {plain}"
+
+    def test_roundtrip(self, trained):
+        md, dictionary, tests = trained
+        registry = md.DictionaryRegistry([dictionary])
+        for message in tests[:20]:
+            blob = mckay.compress(message, "TEXT", dictionary=dictionary)
+            assert mckay.decompress(blob, dictionaries=registry) == message
+
+    def test_compact_header_is_three_bytes(self, trained):
+        md, dictionary, tests = trained
+        blob = mckay.compress(tests[0], "TEXT", dictionary=dictionary)
+        assert blob[:2] == mckay.MAGIC
+        assert blob[2] >> 4 == mckay.MCKAY_VERSION_COMPACT
+        assert blob[2] & 0x0F == mckay.TRANSFORM_ZSTD_DICT
+        # The payload is a bare zstd frame: length and dict id live in it.
+        assert len(blob) == len(dictionary.compress(tests[0])) + 3
+
+    def test_stats_reads_the_length_from_the_frame(self, trained):
+        md, dictionary, tests = trained
+        blob = mckay.compress(tests[0], "TEXT", dictionary=dictionary)
+        assert mckay.stats(blob)["original_size"] == len(tests[0])
+        assert mckay.stats(blob)["transform"] == "zstd_dict"
+
+    def test_missing_dictionary_names_the_id(self, trained):
+        md, dictionary, tests = trained
+        blob = mckay.compress(tests[0], "TEXT", dictionary=dictionary)
+        with pytest.raises(mckay.MissingDictionaryError) as excinfo:
+            mckay.decompress(blob)
+        assert excinfo.value.dict_id == dictionary.dict_id
+
+    def test_transmission_layer_reports_a_missing_dictionary(self, trained):
+        md, dictionary, tests = trained
+        stream = codec.pack_mckay_message(tests[0], "TEXT", dictionary=dictionary)
+        result = codec.unpack_mckay_stream(stream)
+        assert result["missing_dictionary"] == dictionary.dict_id
+        assert str(dictionary.dict_id) in result["error"]
+        # The gist survives, so an operator still learns what was sent.
+        assert result["mckay"]["original_size"] == len(tests[0])
+        assert result["complete"] is False
+
+    def test_transmission_layer_roundtrip(self, trained):
+        md, dictionary, tests = trained
+        registry = md.DictionaryRegistry([dictionary])
+        stream = codec.pack_mckay_message(tests[0], "TEXT", dictionary=dictionary)
+        result = codec.unpack_mckay_stream(stream, dictionaries=registry)
+        assert result["data"] == tests[0]
+        assert result["integrity_ok"] is True
+
+    def test_dictionary_is_skipped_when_it_does_not_help(self, trained):
+        md, dictionary, _tests = trained
+        # A text dictionary has nothing to offer random bytes.
+        rng = random.Random(1)
+        noise = bytes(rng.randrange(256) for _ in range(64))
+        blob = mckay.compress(noise, "BINARY", dictionary=dictionary)
+        assert blob[2] >> 4 != mckay.MCKAY_VERSION_COMPACT
+        assert mckay.decompress(blob) == noise
+
+    def test_save_and_load(self, trained, tmp_path):
+        md, dictionary, tests = trained
+        path = tmp_path / "mission.dict"
+        dictionary.save(path)
+        loaded = md.MissionDictionary.load(path)
+        assert loaded.dict_id == dictionary.dict_id
+        assert loaded.decompress(dictionary.compress(tests[0])) == tests[0]
+
+    def test_registry_loads_a_directory(self, trained, tmp_path):
+        md, dictionary, _tests = trained
+        dictionary.save(tmp_path / "a.dict")
+        dictionary.save(tmp_path / "b.dict")
+        registry = md.DictionaryRegistry()
+        assert registry.load_dir(tmp_path) == 2
+        assert dictionary.dict_id in registry
+
+    def test_training_needs_enough_samples(self, trained):
+        md, _dictionary, _tests = trained
+        with pytest.raises(ValueError, match="at least"):
+            md.train([b"one", b"two"])
