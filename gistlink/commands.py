@@ -282,7 +282,27 @@ def _verify_trailer(
     return out
 
 
+def _check_key(key) -> None:
+    """
+    An empty key is a configuration error, not a way to opt out.
+
+    `key=b""` is falsy, so every `if key:` in this module treated it as "no
+    key at all": signing was skipped and verification bypassed while the
+    caller believed they had supplied one. Failing closed means refusing it.
+    """
+    if key is None:
+        return
+    if not isinstance(key, bytes):
+        raise ValueError("key must be bytes or None")
+    if not key:
+        raise ValueError(
+            "key is empty; pass a real key, or None to opt out of "
+            "authentication explicitly"
+        )
+
+
 def _require_key(key, require_auth: bool, what: str) -> None:
+    _check_key(key)
     if key is None and require_auth:
         raise CommandAuthError(
             f"refusing to return an unverified {what}: pass key= to "
@@ -357,6 +377,7 @@ def encode_cmd(
     elif name == "APPLY_UPDATE":
         pass
 
+    _check_key(key)
     if key:
         if not 0 <= counter <= COUNTER_MAX:
             raise ValueError(f"counter must be 0..{COUNTER_MAX}, got {counter}")
@@ -484,6 +505,7 @@ def encode_cmd_batch(
         body = encode_cmd(cmd, key=None)  # type: ignore
         out += leb128_encode(len(body))
         out += body
+    _check_key(key)
     if key:
         if not 0 <= counter <= COUNTER_MAX:
             raise ValueError(f"counter must be 0..{COUNTER_MAX}, got {counter}")

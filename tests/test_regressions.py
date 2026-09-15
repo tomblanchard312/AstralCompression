@@ -1387,3 +1387,128 @@ class TestFountainAlwaysSolvable:
             assert 1 <= degree <= len(blocks)
             assert len(payload) == 16
         assert lt_decode_blocks(packets, 6, 16)[0] == blocks
+
+
+class TestTextTransformLabelling:
+    """
+    The transform id has to record whether abbreviation coding was actually
+    applied: the decoder decides from it alone whether to run the abbreviation
+    decoder. Labelling an un-abbreviated payload TRANSFORM_TEXT produced two
+    failures, both raised by Codex on PR #6.
+    """
+
+    def test_compressible_non_utf8_roundtrips(self):
+        """Raised as a P1. My earlier test used only incompressible inputs,
+        which fall back to passthrough and so never hit this path."""
+        data = b"\xff" * 1000
+        blob = compress.compress(data, "TEXT")
+        assert blob[3] == compress.TRANSFORM_PASSTHROUGH
+        assert compress.decompress(blob) == data
+
+    def test_literal_marker_sequence_is_not_rewritten(self):
+        """
+        Valid UTF-8 containing the abbreviation marker came back with words
+        substituted into it: silent corruption, worse than the reported crash.
+        """
+        data = ("\x1e001 literal marker sequence " * 60).encode()
+        blob = compress.compress(data, "TEXT")
+        assert compress.decompress(blob) == data
+
+    def test_ordinary_text_still_uses_abbreviation_coding(self):
+        """The fix must not quietly disable the transform for real text."""
+        data = ("satellite telemetry nominal battery " * 50).encode()
+        blob = compress.compress(data, "TEXT")
+        assert blob[3] == compress.TRANSFORM_TEXT
+        assert compress.decompress(blob) == data
+        assert len(blob) < len(data) // 10
+
+    @pytest.mark.parametrize(
+        "data",
+        [b"", b"\xff" * 1000, bytes(range(256)), b"\x80\x81\x82" * 400,
+         "\x1e000\x1e011 mixed".encode(), "café " .encode() * 200],
+    )
+    def test_roundtrip_whatever_the_label(self, data):
+        assert compress.decompress(compress.compress(data, "TEXT")) == data
+
+
+class TestEmptyKeyRejected:
+    """
+    `key=b""` is falsy, so every `if key:` treated it as "no key at all":
+    signing was skipped and verification bypassed while the caller believed
+    they had supplied one. Raised as a P1 by Codex on PR #6.
+    """
+
+    BURN = {"name": "BURN", "thruster_id": 1, "duration_ms": 12500}
+
+    def test_encoding_with_an_empty_key_is_refused(self):
+        from gistlink.commands import encode_cmd, encode_cmd_batch
+
+        with pytest.raises(ValueError, match="empty"):
+            encode_cmd(self.BURN, key=b"")
+        batch = {"policy": {}, "items": [{"tai_offset_s": 1, "cmd": self.BURN}]}
+        with pytest.raises(ValueError, match="empty"):
+            encode_cmd_batch(batch, key=b"")
+
+    def test_decoding_with_an_empty_key_is_refused(self):
+        from gistlink.commands import decode_cmd, encode_cmd
+
+        signed = encode_cmd(self.BURN, key=b"k" * 16, counter=1)
+        with pytest.raises(ValueError, match="empty"):
+            decode_cmd(signed, key=b"")
+        # Even the explicit inspection path: an empty key is a mistake, not a
+        # way to opt out. None is the way to opt out.
+        with pytest.raises(ValueError, match="empty"):
+            decode_cmd(signed, key=b"", require_auth=False)
+
+    def test_real_keys_and_explicit_none_still_work(self):
+        from gistlink.commands import decode_cmd, encode_cmd
+
+        signed = encode_cmd(self.BURN, key=b"k" * 16, counter=1)
+        assert decode_cmd(signed, key=b"k" * 16)["authenticated"] is True
+        assert decode_cmd(signed, require_auth=False)["authenticated"] is False
+
+
+class TestPackagingExtras:
+    """
+    `gistlink[fast]` named a distribution nothing publishes, so the extra
+    failed to install at all. Raised as a P1 by Codex on PR #6.
+    """
+
+    def _extras(self):
+        import pathlib
+        import re
+
+        text = (pathlib.Path(__file__).resolve().parent.parent
+                / "pyproject.toml").read_text(encoding="utf-8")
+        block = text.split("[project.optional-dependencies]")[1]
+        block = block.split("\n[")[0]
+        return re.findall(r'"([^"]+)"', block)
+
+    def test_no_extra_names_an_unpublished_distribution(self):
+        named = {dep.split(">")[0].split("=")[0].strip() for dep in self._extras()}
+        # These are the names this repository itself builds; they are not on
+        # PyPI, so an extra that requires them cannot install.
+        assert "gistlink-compress" not in named
+        assert "gistlink-native" not in named
+        assert "gistlink_native" not in named
+
+    def test_extras_are_real_package_names(self):
+        expected = {"reedsolo", "zstandard", "pycodec2", "numpy", "zstd"}
+        named = {dep.split(">")[0].split("=")[0].strip() for dep in self._extras()}
+        assert named <= expected, f"unexpected dependency: {named - expected}"
+
+    @pytest.mark.parametrize(
+        "data",
+        [("\x1e001 literal marker " * 60).encode(), b"\x1e" * 500,
+         "\x1eff2 and \x1e000 mixed in prose ".encode() * 40],
+    )
+    def test_marker_bearing_text_skips_abbreviation(self, data):
+        """
+        Abbreviation coding is not injective: the decoder rewrites the marker
+        sequence wherever it appears. Text carrying the marker must therefore
+        not be abbreviated, on either backend. The Rust implementation shares
+        the flaw, so this only passes if the guard runs before that path too.
+        """
+        blob = compress.compress(data, "TEXT")
+        assert blob[3] == compress.TRANSFORM_PASSTHROUGH
+        assert compress.decompress(blob) == data

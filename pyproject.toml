@@ -45,10 +45,15 @@ gistlink = ["py.typed"]
 rs    = ["reedsolo>=1.7"]
 dict  = ["zstandard>=0.21"]
 voice = ["pycodec2>=4.0", "numpy>=1.24"]
-fast = ["gistlink-compress>=0.1.0", "zstd>=1.5"]
+# The Rust extension is not on PyPI: this repository builds it under the name
+# gistlink_native, and naming any distribution here made `pip install
+# gistlink[fast]` fail outright. The extra installs the zstd binding it can
+# actually get; build the extension with maturin (see the README) to add the
+# native path.
+fast = ["zstd>=1.5"]
 all   = [
     "reedsolo>=1.7", "zstandard>=0.21", "pycodec2>=4.0", "numpy>=1.24",
-    "gistlink-compress>=0.1.0", "zstd>=1.5",
+    "zstd>=1.5",
 ]
 
 [project.urls]

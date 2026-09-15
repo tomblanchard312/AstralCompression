@@ -141,9 +141,27 @@ def _detect_type(data: bytes) -> str:
     return "BINARY"
 
 
+ABBREV_MARKER = b""
+
+
+def _abbreviation_is_safe(data: bytes) -> bool:
+    """
+    Whether abbreviation coding can be reversed for this input.
+
+    The code is not injective: the decoder rewrites any `` followed by two
+    hex digits and a case digit into a word, so text that already contains
+    that sequence comes back with words substituted into it. Skipping the
+    transform for input containing the marker at all is the cheap, exact
+    guard, and the marker is a control character that ordinary mission text
+    does not carry. The Rust implementation shares the flaw, so this gates
+    both backends.
+    """
+    return ABBREV_MARKER not in data
+
+
 def _compress_text(data: bytes) -> tuple[int, int, bytes]:
     """Returns (transform_id, entropy_coder, payload_bytes)."""
-    if _rust_has("compress_text"):
+    if _rust_has("compress_text") and _abbreviation_is_safe(data):
         try:
             return TRANSFORM_TEXT, ENTROPY_ZSTD, _ac.compress_text(data)
         except Exception:
@@ -151,12 +169,19 @@ def _compress_text(data: bytes) -> tuple[int, int, bytes]:
                 "Rust text compression failed, falling back to Python", UserWarning
             )
 
+    # The transform id must record whether abbreviation coding was actually
+    # applied, because the decoder decides from it alone whether to run the
+    # abbreviation decoder. Labelling an un-abbreviated payload TRANSFORM_TEXT
+    # corrupts anything that merely looks abbreviated: text containing the
+    # literal marker sequence came back with words substituted into it, and
+    # compressible non-UTF-8 raised on decode. Candidates therefore carry the
+    # transform they belong to.
     candidates = [
-        (ENTROPY_ZLIB, zlib.compress(data, 9)),
-        (ENTROPY_LZMA, lzma.compress(data, preset=9)),
+        (TRANSFORM_PASSTHROUGH, ENTROPY_ZLIB, zlib.compress(data, 9)),
+        (TRANSFORM_PASSTHROUGH, ENTROPY_LZMA, lzma.compress(data, preset=9)),
     ]
     try:
-        abbr_bytes = _text_abbrev_encode(data)
+        abbr_bytes = _text_abbrev_encode(data) if _abbreviation_is_safe(data) else None
     except UnicodeDecodeError:
         # Caller said TEXT but the bytes are not UTF-8. Abbreviation coding
         # cannot apply, but there is no reason to fail: entropy-code it and
@@ -166,14 +191,14 @@ def _compress_text(data: bytes) -> tuple[int, int, bytes]:
     if abbr_bytes is not None:
         candidates.extend(
             [
-                (ENTROPY_ZLIB, zlib.compress(abbr_bytes, 9)),
-                (ENTROPY_LZMA, lzma.compress(abbr_bytes, preset=9)),
+                (TRANSFORM_TEXT, ENTROPY_ZLIB, zlib.compress(abbr_bytes, 9)),
+                (TRANSFORM_TEXT, ENTROPY_LZMA, lzma.compress(abbr_bytes, preset=9)),
             ]
         )
-    best_entropy, best = min(candidates, key=lambda x: len(x[1]))
+    best_transform, best_entropy, best = min(candidates, key=lambda c: len(c[2]))
     if len(best) >= len(data):
         return TRANSFORM_PASSTHROUGH, ENTROPY_LZMA, lzma.compress(data, preset=9)
-    return TRANSFORM_TEXT, best_entropy, best
+    return best_transform, best_entropy, best
 
 
 def _apply_case(word: str, case_flag: int) -> str:
