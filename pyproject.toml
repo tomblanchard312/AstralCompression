@@ -36,7 +36,10 @@ classifiers = [
 ]
 
 [tool.setuptools]
-packages = { find = { exclude = ["astral_compress*", "tests*", "benchmarks*", "docs*"] } }
+packages = { find = { exclude = ["astral_compress*", "tests*", "benchmarks*", "docs*", "examples*"] } }
+
+[tool.setuptools.package-data]
+astral = ["py.typed"]
 
 [project.optional-dependencies]
 rs    = ["reedsolo>=1.7"]

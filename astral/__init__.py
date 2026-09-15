@@ -12,7 +12,21 @@ from .codec import (
     unpack_frames_tm,
 )
 
+from .commands import (  # noqa: F401
+    CommandAuthError,
+    CommandSequencer,
+    PersistentReplayGuard,
+    ReplayGuard,
+    ReplayStateError,
+)
+
 __all__ = [
+    # Commanding: authentication and anti-replay
+    "CommandAuthError",
+    "CommandSequencer",
+    "PersistentReplayGuard",
+    "ReplayGuard",
+    "ReplayStateError",
     "header_redundancy_for",
     "pack_message",
     "pack_mckay_message",

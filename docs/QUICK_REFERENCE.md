@@ -152,5 +152,5 @@ transmission to be smaller than the source.
 python -m pytest tests
 python -m flake8 astral/ tests/ *.py --config=setup.cfg
 python benchmarks/mckay_vs_standard.py
-python -m astral.mckay_usage_example
+python examples/usage.py
 ```

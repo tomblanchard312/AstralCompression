@@ -5,13 +5,17 @@ McKay + ASTRAL usage examples.
 Runnable demonstrations of the full path: domain-aware compression, a
 replicated metadata gist, and a fountain-coded body that survives packet loss.
 
-    python -m astral.mckay_usage_example
+    python examples/usage.py
 """
 
 import math
+import os
 import random
 import struct
 import sys
+
+# Run from a checkout without installing.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")

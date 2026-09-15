@@ -167,4 +167,4 @@ entry points, so an un-built source tree cannot masquerade as the fast path.
 - [../README.md](../README.md): project overview and measured performance
 - [FORMAT.md](FORMAT.md): the wire format specification
 - [QUICK_REFERENCE.md](QUICK_REFERENCE.md): command and API cheat sheet
-- `python -m astral.mckay_usage_example`: runnable demonstrations
+- `python examples/usage.py`: runnable demonstrations

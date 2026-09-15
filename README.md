@@ -69,7 +69,7 @@ result["data"]    # recovered bytes, once enough atoms arrive
 
 Every number below is produced by a script in this repository on the datasets
 those scripts generate. Reproduce with `python benchmarks/mckay_vs_standard.py` and
-`python -m astral.mckay_usage_example`. Expect variation with your data.
+`python examples/usage.py`. Expect variation with your data.
 
 ### Mission dictionaries: the biggest win on short messages
 

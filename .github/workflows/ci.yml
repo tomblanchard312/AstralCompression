@@ -61,4 +61,4 @@ jobs:
       - name: Run the worked examples
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: python -m astral.mckay_usage_example
+        run: python examples/usage.py
